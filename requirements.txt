@@ -1,0 +1,47 @@
+# LangChain Core
+langchain
+langchain-core
+langchain-community
+langchain-voyageai
+
+# PDF Loader
+pypdf
+
+# OpenAI Integration
+langchain-openai
+openai
+
+# Anthropic Integration
+langchain-anthropic
+
+# Google Gemini (PaLM) Integration
+langchain-google-genai
+google-generativeai
+
+# Hugging Face Integration
+langchain-huggingface
+transformers
+huggingface_hub
+
+# Environment Variable Management
+python-dotenv
+pydantic
+
+# Machine Learning Utilities
+numpy
+
+# Web Framework
+fastapi
+uvicorn
+
+# FAISS
+faiss-cpu
+
+# LangChain Text Splitters
+langchain-text-splitters
+
+# Sentence Transformers
+sentence-transformers
+
+# voyage-ai
+voyageai
