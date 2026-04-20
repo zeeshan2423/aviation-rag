@@ -1,7 +1,4 @@
-from app.services.query_rewriter import rewrite_query
-
 def retrieve(query, db, k=15):
-    query = rewrite_query(query)
     results = db.similarity_search_with_score(query, k=k)
 
     formatted = []
@@ -14,3 +11,25 @@ def retrieve(query, db, k=15):
         })
 
     return formatted
+
+def hybrid_retrieve(query, db, bm25, k=5):
+    faiss_results = db.similarity_search_with_score(query, k=k)
+    bm25_results = bm25.search(query, k=k)
+
+    combined = []
+
+    for doc, score in faiss_results:
+        combined.append({
+            "text": doc.page_content,
+            "metadata": doc.metadata,
+            "score": score
+        })
+
+    for doc in bm25_results:
+        combined.append({
+            "text": doc["text"],
+            "metadata": doc["metadata"],
+            "score": 0.5  # neutral score
+        })
+
+    return combined
