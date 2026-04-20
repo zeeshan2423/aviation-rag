@@ -1,3 +1,10 @@
+"""
+Context Orchestration Service for Aviation RAG.
+Aggregates and formats retrieved document chunks into grounded context windows for the LLM.
+Includes deduplication of source metadata for traceability.
+"""
+
+
 def deduplicate_sources(sources):
     """
     Removes duplicate source entries based on section, subsection, and chunk_id.
@@ -15,6 +22,10 @@ def deduplicate_sources(sources):
 
 
 def build_context(chunks, min_score_threshold=0.5):
+    """
+    Constructs the grounded context string and metadata sources from retrieval results.
+    Filters out weak matches based on the provided threshold.
+    """
     context_parts = []
     sources = []
 
@@ -39,7 +50,7 @@ def build_context(chunks, min_score_threshold=0.5):
         })
 
     context = "\n\n".join(context_parts)
-    
+
     # Deduplicate sources before returning
     sources = deduplicate_sources(sources)
 

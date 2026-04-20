@@ -1,53 +1,94 @@
+"""
+Hybrid Retrieval Engine for Aviation RAG.
+Orchestrates Sparse (BM25) and Dense (FAISS) search with deduplication logic.
+Uses a singleton pattern to maintain engine state without global keywords.
+"""
+
+from typing import List, Dict, Any, Optional, Set
+
+from langchain_community.vectorstores import FAISS
 from app.services.bm25 import BM25Retriever
+from app.utils.logger import setup_logger
 
-# Global instance initialized during app startup
-BM25 = None
+logger = setup_logger("hybrid_retrieval")
 
-def init_bm25(all_chunks):
+
+class HybridSearchOrchestrator:
     """
-    Initializes the global BM25 instance with the provided document chunks.
-    Called once during application startup.
+    Encapsulates the state and logic for hybrid retrieval.
     """
-    global BM25
-    BM25 = BM25Retriever(all_chunks)
+    _bm25: Optional[BM25Retriever] = None
+
+    @classmethod
+    def initialize_bm25(cls, all_chunks: List[Dict[str, Any]]) -> None:
+        """
+        Initializes the sparse retriever instance within the orchestrator.
+        """
+        try:
+            cls._bm25 = BM25Retriever(all_chunks)
+            logger.info("BM25 Retrieval Engine initialized with %d chunks.", len(all_chunks))
+        except (ValueError, KeyError, TypeError) as e:
+            logger.error("Data error during BM25 initialization: %s", e)
+            cls._bm25 = None
+        except RuntimeError as e:
+            # Final safety net for BM25 initialization (Standardized for Production)
+            logger.error("Unexpected failure during BM25 initialization: %s", e)
+            cls._bm25 = None
+
+    @classmethod
+    def get_bm25(cls) -> Optional[BM25Retriever]:
+        """Returns the current BM25 instance."""
+        return cls._bm25
 
 
-def hybrid_retrieve(query, db, bm25, k=10):
+def init_bm25(all_chunks: List[Dict[str, Any]]) -> None:
     """
-    Combines results from semantic (FAISS) and keyword (BM25) search.
-    Deduplicates results based on 'chunk_id' to ensure unique content.
+    Legacy wrapper for orchestrator initialization.
     """
-    # 1. Fetch Candidates (k=10 from both)
-    faiss_results = db.similarity_search_with_score(query, k=k)
-    bm_results = bm25.search(query, k=k)
+    HybridSearchOrchestrator.initialize_bm25(all_chunks)
 
-    seen = set()
-    combined = []
 
-    # 2. Process FAISS results (prioritize Dense hits)
-    for doc, score in faiss_results:
-        cid = doc.metadata.get("chunk_id")
-        if cid in seen:
-            continue
-        seen.add(cid)
-        combined.append({
-            "text": doc.page_content,
-            "metadata": doc.metadata,
-            "score": float(score),
-            "origin": "faiss"
-        })
+def hybrid_retrieve(query: str, db: FAISS, k: int = 10) -> List[Dict[str, Any]]:
+    """
+    Orchestrates a hybrid search combining Semantic (Dense) and Keyword (Sparse) retrieval.
+    Includes chunk-level deduplication and strict type-safe results.
+    """
+    results: List[Dict[str, Any]] = []
+    seen_chunk_ids: Set[str] = set()
 
-    # 3. Process BM25 results (Keyword hits)
-    for d in bm_results:
-        cid = d["metadata"].get("chunk_id")
-        if cid in seen:
-            continue
-        seen.add(cid)
-        combined.append({
-            "text": d["text"],
-            "metadata": d["metadata"],
-            "score": 0.5,  # Neutral baseline as BM25 scores aren't normalized with FAISS
-            "origin": "bm25"
-        })
+    # 1. Execute FAISS Semantic Search
+    try:
+        faiss_results = db.similarity_search_with_score(query, k=k)
+        for doc, score in faiss_results:
+            chunk_id = doc.metadata.get("chunk_id")
+            if chunk_id and chunk_id not in seen_chunk_ids:
+                seen_chunk_ids.add(chunk_id)
+                results.append({
+                    "text": doc.page_content,
+                    "metadata": doc.metadata,
+                    "score": float(score)  # Cast to Python float for JSON compatibility
+                })
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Failure in semantic FAISS retrieval: %s", e)
 
-    return combined
+    # 2. Execute BM25 Keyword Search
+    bm25 = HybridSearchOrchestrator.get_bm25()
+    if bm25:
+        try:
+            bm_results = bm25.search(query, k=k)
+            for d in bm_results:
+                chunk_id = d["metadata"].get("chunk_id")
+                if chunk_id and chunk_id not in seen_chunk_ids:
+                    seen_chunk_ids.add(chunk_id)
+                    results.append({
+                        "text": d["text"],
+                        "metadata": d["metadata"],
+                        "score": float(d.get("score", 0.0))
+                    })
+        except (KeyError, ValueError, RuntimeError) as e:
+            logger.warning("Failure in keyword BM25 retrieval: %s", e)
+    else:
+        logger.warning("BM25 Engine not initialized, skipping sparse retrieval.")
+
+    logger.debug("Hybrid retrieval finished with %d deduplicated candidates.", len(results))
+    return results

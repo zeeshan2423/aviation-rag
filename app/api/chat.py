@@ -1,71 +1,96 @@
+"""
+Aviation SOP Chat API Endpoint.
+Handles conversational RAG flow: rewriting, hybrid retrieval, reranking, and generation.
+"""
+
 import time
-from fastapi import APIRouter, Request
-from app.models.schema import ChatRequest, ChatResponse
+from typing import List
+
+from fastapi import APIRouter, Request, HTTPException
+
+from app.models.schema import ChatRequest, ChatResponse, SourceMetadata
+from app.utils.limiter import limiter
+from app.services.query_rewriter import rewrite_query
+from app.services.hybrid import hybrid_retrieve
 from app.services.reranker import rerank
 from app.services.context_builder import build_context
 from app.services.llm import generate_answer
-from app.services.query_rewriter import rewrite_query_with_memory
-from app.services.memory_store import get_memory
-from app.services import hybrid
-from app.utils.logger import logger
-from app.utils.limiter import limiter
+from app.services.metrics import track_query
+from app.utils.logger import setup_logger
+from app.core.config import settings
 
+logger = setup_logger("chat_api")
 router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("10/minute")
-async def chat(req: ChatRequest, request: Request):
+async def chat(request: Request, chat_req: ChatRequest):
+    """
+    Main conversational endpoint with production security and precision layers.
+    Flow: Rewrite -> Hybrid Retrieve -> Rerank -> Confidence Gate -> LLM Generate.
+    """
     start_time = time.time()
-    
-    memory = get_memory(req.session_id)
-    memory_context = memory.get_context()
 
-    # 🚀 1. Await Rewriting
-    rewritten_query = await rewrite_query_with_memory(req.query, memory_context)
-    
-    # 🔍 2. Hybrid Retrieval (Dense FAISS + Sparse BM25)
-    db = request.app.state.db
-    candidates = hybrid.hybrid_retrieve(rewritten_query, db, hybrid.BM25, k=12)
-    
-    # 🎯 3. Cross-Encoder Reranking
-    reranked = rerank(candidates, rewritten_query)
+    try:
+        # 1. Query Rewriting (Contextual intelligence)
+        rewritten_query = await rewrite_query(
+            chat_req.query,
+            chat_req.session_id
+        )
 
-    # 🔥 Answer Threshold Gate
-    MIN_RERANK_SCORE = 2.0
-    CAUTION_RERANK_SCORE = 5.0
-    
-    top_chunks = reranked[:3]
-    top_score = top_chunks[0].get("rerank_score", -10) if top_chunks else -10
-    
-    if not top_chunks or top_score < MIN_RERANK_SCORE:
-        answer = "Not found in SOP"
-        sources = []
-    else:
-        context, sources = build_context(top_chunks)
-        if not context:
-            answer = "Not found in SOP"
-            sources = []
-        else:
-            answer = await generate_answer(req.query, context, memory_context)
-            
-            if top_score < CAUTION_RERANK_SCORE:
-                answer += "\n\n⚠️ NOTE: This information may be incomplete based on your query's precision."
-                
-            memory.add(req.query, answer)
+        # 2. Hybrid Retrieval (Recall booster)
+        db = request.app.state.db
+        candidates = hybrid_retrieve(rewritten_query, db)
 
-    # 📊 Observability & Metrics
-    total_latency_ms = int((time.time() - start_time) * 1000)
-    
-    from app.services.metrics import track_request
-    track_request(latency_ms=total_latency_ms, cache_hit=False)
+        # 3. Reranking (Precision booster)
+        reranked_chunks = rerank(rewritten_query, candidates)
 
-    logger.info({
-        "event": "chat_request",
-        "session_id": req.session_id,
-        "query": req.query,
-        "rewritten": rewritten_query,
-        "latency_ms": total_latency_ms,
-        "top_score": round(top_score, 4)
-    })
+        # 🔥 PRODUCTION SAFETY: Confidence Threshold Gate
+        if not reranked_chunks or reranked_chunks[0]["rerank_score"] < settings.MIN_RERANK_SCORE:
+            score = reranked_chunks[0]['rerank_score'] if reranked_chunks else 'N/A'
+            logger.info("Query rejected by safety gate. Top score: %s", score)
+            track_query(success=True, latency=time.time() - start_time)
+            return ChatResponse(
+                answer="Not found in SOP",
+                sources=[]
+            )
 
-    return ChatResponse(answer=answer, sources=sources)
+        # 4. Context Preparation
+        top_chunks = reranked_chunks[:3]
+        final_context = build_context(top_chunks)
+
+        # 5. LLM Answer Generation
+        answer = await generate_answer(
+            chat_req.query,
+            final_context,
+            memory=chat_req.session_id
+        )
+
+        # ✨ DUAL THRESHOLD: Precision Warning logic
+        if reranked_chunks[0]["rerank_score"] < settings.CAUTION_RERANK_SCORE:
+            answer += "\n\nNOTE: This information may be incomplete."
+
+        # 6. Response Formatting
+        sources: List[SourceMetadata] = [
+            SourceMetadata(
+                section=c["metadata"].get("section", "Unknown"),
+                subsection=c["metadata"].get("subsection", "Unknown"),
+                chunk_id=c["metadata"].get("chunk_id", "Unknown")
+            ) for c in top_chunks
+        ]
+
+        # 📊 Metrics Tracking
+        track_query(success=True, latency=time.time() - start_time)
+
+        return ChatResponse(
+            answer=answer,
+            sources=sources
+        )
+
+    except Exception as e:
+        logger.error("Chat Endpoint Failure: %s", e, exc_info=True)
+        track_query(success=False, latency=time.time() - start_time)
+        raise HTTPException(
+            status_code=500,
+            detail="An internal processing error occurred."
+        ) from e

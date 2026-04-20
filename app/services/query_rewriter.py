@@ -1,58 +1,80 @@
-import asyncio
-from google.generativeai import GenerativeModel
-from app.services.cache import make_key, get_cache, set_cache, get_or_lock
+"""
+Query Rewriting Service for Aviation RAG.
+Resolves conversational context and pronouns to create standalone search queries.
+Features Redis-backed caching with stampede protection.
+"""
 
-# Using Gemini 3.1 Flash Lite for query disambiguation
-MODEL_NAME = "gemini-3.1-flash-lite-preview"
-model = GenerativeModel(MODEL_NAME)
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.services.cache import make_key, set_cache, get_or_lock
+from app.core.config import settings
+from app.utils.logger import setup_logger
+from app.services.memory_store import get_history
+
+logger = setup_logger("query_rewriter")
+
+# Initialize the rewriting model
+llm = ChatGoogleGenerativeAI(
+    model=settings.LLM_MODEL_NAME,
+    google_api_key=settings.GEMINI_API_KEY,
+    temperature=0
+)
 
 
-async def rewrite_query_with_memory(query: str, memory: str) -> str:
+async def rewrite_query(query: str, session_id: str) -> str:
     """
     Rewrites a conversational query into a standalone search query.
-    Refinements: Locking, Better Keys.
+    Resolves pronouns by examining the multi-turn session history.
     """
-    # ⚙️ 1. Generate Key (including model)
+    # 1. Fetch conversational history for this session
+    history = get_history(session_id)
+    if not history:
+        return query
+
+    # 2. Build Cache Key
     key_payload = {
-        "model": MODEL_NAME,
+        "model": settings.LLM_MODEL_NAME,
         "q": query,
-        "mem": memory
+        "hist": str(history)  # Convert object to string for JSON serialization
     }
     key = make_key("rewrite", key_payload)
 
-    # ⚙️ 2. Check Cache with Stampede Protection
-    cached_val, should_compute = get_or_lock(key)
-    
-    if cached_val:
-        return cached_val
-        
-    if not should_compute:
-        await asyncio.sleep(0.2)
-        cached_val = get_cache(key)
+    # 3. Check Cache (Stampede protection)
+    try:
+        cached_val, should_compute = get_or_lock(key)
         if cached_val:
-            return cached_val
+            return str(cached_val)
+    except Exception as e:
+        # Catching Exception here and logging because this is a non-blocking 
+        # cache layer that should fallback to computation.
+        logger.warning("Rewriter cache lookup failed: %s", e)
+        should_compute = True
 
-    # 🚀 3. Compute
+    if not should_compute:
+        return query  # Fallback
+
+    # 4. Perform Rewriting
     prompt = f"""
-You are a query rewriting assistant.
+    You are a query rewriting assistant for an Aviation SOP RAG system.
+    Goal: Rewrite the user's latest query into a standalone, descriptive search question.
+    Rule: Resolve pronouns (it, they, those) using the provided conversation history.
+    
+    Conversation History:
+    {history}
+    
+    Latest User Query:
+    {query}
+    
+    Rewritten Search Query:
+    """
 
-Your task:
-- Rewrite the user's query into a standalone question
-- Resolve pronouns using conversation history
+    try:
+        response = await llm.ainvoke(prompt)
+        rewritten = str(response.content).strip()
 
-Conversation:
-{memory}
-
-User Query:
-{query}
-
-Rewritten Query:
-"""
-
-    response = await model.generate_content_async(prompt)
-    rewritten = response.text.strip()
-
-    # ⚙️ 4. Store in Cache
-    set_cache(key, rewritten)
-
-    return rewritten
+        # 5. Store result
+        set_cache(key, rewritten, ttl=1800)
+        return rewritten
+    except Exception as e:
+        # Standardize logging
+        logger.error("Query rewriting failed: %s", e)
+        return query  # Fallback to original query

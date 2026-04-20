@@ -1,13 +1,18 @@
-from app.utils.token_chunker import split_into_token_chunks
+"""
+Data Ingestion Pipeline for Aviation RAG.
+Orchestrates PDF parsing, structural splitting, token chunking, and FAISS indexing.
+"""
+
+import json
+import logging
+import time
+
+from langchain_community.vectorstores import FAISS
+from app.services.embeddings import get_embedding_model
 from app.utils.pdf_parser import load_and_merge_pdf
 from app.utils.section_splitter import split_sections
 from app.utils.subsection_splitter import split_subsections
-from app.services.embeddings import get_embedding_model
-
-from langchain_community.vectorstores import FAISS
-import json
-import time
-import logging
+from app.utils.token_chunker import split_into_token_chunks
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +22,8 @@ logger = logging.getLogger(__name__)
 # DATA LOADING
 # -----------------------------
 def load_augmented_data():
-    with open("data/augmented/definitions.json") as f:
+    """Loads supplementary grounding data from the augmented definitions vault."""
+    with open("data/augmented/definitions.json", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -25,6 +31,10 @@ def load_augmented_data():
 # DOCUMENT PROCESSING
 # -----------------------------
 def process_document(sections):
+    """
+    Splits identified sections into the sub-section architectural layer.
+    Ensures every segment maintains its parent section provenance.
+    """
     final_chunks = []
 
     for sec in sections:
@@ -46,6 +56,10 @@ def process_document(sections):
 # FAISS BUILDING (BATCHED)
 # -----------------------------
 def build_faiss(chunks):
+    """
+    Constructs a FAISS vector index from chunks in batched transactions.
+    Saves the finalized index to the designated vectorstore path.
+    """
     texts = [c["text"] for c in chunks]
 
     # 🔥 include chunk_id in metadata
@@ -62,13 +76,13 @@ def build_faiss(chunks):
     batch_size = 20
     db = None
 
-    logger.info(f"Total chunks: {len(chunks)}")
+    logger.info("Total chunks: %d", len(chunks))
 
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i:i + batch_size]
         batch_metadatas = metadatas[i:i + batch_size]
 
-        logger.info(f"Batch {i//batch_size + 1}")
+        logger.info("Batch %d", i // batch_size + 1)
 
         if db is None:
             db = FAISS.from_texts(
@@ -96,6 +110,10 @@ def build_faiss(chunks):
 # MAIN INGESTION PIPELINE
 # -----------------------------
 def run_ingestion():
+    """
+    Executes the end-to-end ingestion orchestrator:
+    Merge -> Split -> Subsection -> Tokenize -> Augment -> Index.
+    """
     logger.info("📄 Loading PDF...")
     text = load_and_merge_pdf("data/raw/faa_sop.pdf")
 
@@ -116,7 +134,7 @@ def run_ingestion():
 
     final_chunks.extend(augmented)
 
-    logger.info(f"✅ Final chunks: {len(final_chunks)}")
+    logger.info("✅ Final chunks: %d", len(final_chunks))
 
     logger.info("⚙️ Building FAISS index...")
     build_faiss(final_chunks)
@@ -126,4 +144,4 @@ def run_ingestion():
 # ENTRY POINT
 # -----------------------------
 if __name__ == "__main__":
-    run_ingestion()
+    run_ingestion()
