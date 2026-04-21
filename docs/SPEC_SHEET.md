@@ -36,10 +36,10 @@ To build a **production-grade conversational AI system** specifically engineered
 
 ### 6. Conversational Memory Layer
 *   **Memory Type**: Session-based windowed memory (`memory_store.py`).
-*   **Rewriting**: **Gemini 3.1 Flash** resolves multi-turn ambiguities (e.g., "its", "those procedures") by rewriting incoming queries into self-contained, context-aware retrieval queries.
+*   **Rewriting**: **Gemini 1.5 Flash** resolves multi-turn ambiguities (e.g., "its", "those procedures") by rewriting incoming queries into self-contained, context-aware retrieval queries.
 
 ### 7. LLM Reasoning Layer
-*   **Inference Engine**: **Gemini 3.1 Flash Lite**.
+*   **Inference Engine**: **Gemini 1.5 Flash**.
 *   **Configuration**: Temperature=0.0 for deterministic output. Strict system prompts enforce grounding (answer *only* from context) and source attribution.
 
 ### 8. Production Performance Layer
@@ -52,6 +52,13 @@ Our system is governed by a **Dual-Threshold Security Gate**:
 *   **Absolute Reject (< 2.0)**: If the Top-1 rerank score is below 2.0, the query is rejected as "Not found in SOP".
 *   **Precision Warning (2.0 - 5.0)**: Answers are provided but appended with a safety note indicating potential incompleteness.
 *   **High Confidence (> 5.0)**: Standard response with full source validation.
+
+### 10. Production Dependency Stack
+*   **API Framework**: FastAPI / Uvicorn
+- **Observation Engine**: SlowAPI (Rate Limiting)
+- **Infrastructure**: Redis (Metrics & Caching)
+- **Configuration Engine**: Pydantic-Settings
+- **Search Logic**: Rank_BM25 & FAISS
 
 ---
 

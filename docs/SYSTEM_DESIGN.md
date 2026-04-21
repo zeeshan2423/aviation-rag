@@ -13,7 +13,7 @@ flowchart TD
     A[User / Client] --> B[FastAPI /chat Endpoint]
 
     B --> C[Session Memory Store]
-    C --> D[Query Rewriter - Gemini 3.1 Flash]
+    C --> D[Query Rewriter - Gemini 1.5 Flash]
 
     D --> E{Hybrid Retriever}
     E --> E1[FAISS - Semantic Search]
@@ -29,7 +29,7 @@ flowchart TD
     I -- Score < 2.0 --> J[Reject Response]
     I -- Score > 2.0 --> K[Context Builder]
 
-    K --> L[LLM - Gemini 3.1 Flash]
+    K --> L[LLM - Gemini 1.5 Flash]
     L --> M[Response Refiner]
 
     M --> N[Redis Caching Layer]
@@ -66,10 +66,14 @@ We combine **Semantic Similarity** (FAISS) with **Keyword Correspondence** (BM25
 Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **hard safety gate** at the reranking stage. By using a Cross-Encoder as a "Referee", we can deterministically reject queries with low relevance scores, effectively eliminating hallucination risks for out-of-scope requests.
 
 ### 3. Conversational Intelligence
-The **Query Rewriting** layer utilizes **Gemini 3.1 Flash** to transform ambiguous, multi-turn user queries into self-contained retrieval statements. This ensures that retrieval always targeted the original intent, even when users use pronouns like "it" or "their".
+The **Query Rewriting** layer utilizes **Gemini 1.5 Flash** to transform ambiguous, multi-turn user queries into self-contained retrieval statements. This ensures that retrieval always targeted the original intent, even when users use pronouns like "it" or "their".
 
-### 4. Production-Grade Observability
-A dedicated **Metrics Engine** tracks every request's latency, cache status, and confidence scores in Redis. This metrics suite is exposed via the `/metrics` endpoint, enabling real-time monitoring and threshold tuning.
+A dedicated **Metrics Engine** tracks every request's latency, cache status, and confidence scores in Redis. This metrics suite is **stateful and consistent across multiple workers**, as it utilizes distributed Redis increments rather than process-local memory. Telemetry is exposed via the `/metrics` endpoint, enabling real-time monitoring and threshold tuning.
+
+### 5. Fast-Fail Startup Validation
+The system implements a **Dual-Safety Lifecycle**:
+- **Environment Validation**: On startup, the system verifies all production keys (Gemini, Voyage, Redis); it will refuse to launch with incomplete configurations.
+- **Resource Preloading**: All heavy search indices (FAISS, BM25) and deep-learning encoders are pre-heated in the FastAPI `lifespan` handler, ensuring zero "cold-start" latency for the first user query.
 
 ---
 
@@ -84,4 +88,3 @@ A dedicated **Metrics Engine** tracks every request's latency, cache status, and
 - Pilot training and procedure verification.
 - Simulation support for Pilot Flying (PF) and Pilot Monitoring (PM) responsibilities.
 - Rapid lookup of FAA safety standards and procedural checklists.
-落
