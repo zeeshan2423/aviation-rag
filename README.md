@@ -89,3 +89,21 @@ The platform features an enterprise-grade observability suite:
 ### 🛡️ Maintenance Scripts
 - `scripts/reset.sh`: Clears the local vector database for clean re-ingestions.
 - `scripts/rebuild.sh`: Automatically runs ingestion and relaunches the entire Docker stack.
+
+---
+
+## 🧪 Evaluation Suite
+
+The platform includes a dedicated discovery and evaluation framework to measure system accuracy and retrieval precision.
+
+### Running Benchmarks
+Execute the evaluation suite from the project root:
+```bash
+python evaluation/evaluate.py
+```
+
+### Captured Metrics
+- **Accuracy**: Measures keyword presence in the generated answer against ground-truth SOP definitions.
+- **Retrieval Hit Rate**: Quantifies the "Recall" performance by checking if the correct context chunks were present in the Top-3 results.
+- **End-to-End Latency**: Tracks the full pipeline execution time (Rewrite -> Retrieve -> Rerank -> LLM).
+- **Cache Hit Monitoring**: Reports whether the measurement was performed via a fresh LLM call or a cached result.

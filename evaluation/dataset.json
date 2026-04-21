@@ -1,0 +1,17 @@
+[
+  {
+    "question": "What is pilot monitoring?",
+    "expected_keywords": ["monitoring", "cross-checking", "pilot flying"],
+    "type": "definition"
+  },
+  {
+    "question": "What are the responsibilities of pilot monitoring?",
+    "expected_keywords": ["monitoring", "systems", "flight path"],
+    "type": "responsibility"
+  },
+  {
+    "question": "What is fuel dumping procedure?",
+    "expected_keywords": [],
+    "type": "out_of_scope"
+  }
+]
