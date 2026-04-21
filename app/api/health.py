@@ -1,3 +1,8 @@
+"""
+Health Check Router for Aviation RAG.
+Provides a standard endpoint for operational readiness and uptime monitoring.
+"""
+
 from fastapi import APIRouter
 
 router = APIRouter()

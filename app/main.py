@@ -15,7 +15,6 @@ from app.api.metrics import router as metrics_router
 from app.utils.limiter import limiter
 from app.services.embeddings import get_embedding_model
 from app.services.hybrid import init_bm25
-from app.services.metrics import get_metrics
 from app.utils.logger import logger
 from app.core.config import settings
 

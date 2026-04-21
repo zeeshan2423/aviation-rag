@@ -1,3 +1,8 @@
+"""
+System Metrics Router for Aviation RAG.
+Exposes performance telemetry for observability and monitoring.
+"""
+
 from fastapi import APIRouter
 from app.services.metrics import get_metrics
 
