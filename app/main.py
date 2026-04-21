@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_community.vectorstores import FAISS
 
 from app.api.chat import router as chat_router
+from app.api.health import router as health_router
+from app.api.metrics import router as metrics_router
 from app.utils.limiter import limiter
 from app.services.embeddings import get_embedding_model
 from app.services.hybrid import init_bm25
@@ -87,20 +89,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.state.limiter = limiter
 
 app.include_router(chat_router)
-
-@app.get("/metrics")
-def metrics():
-    """
-    Exposes production metrics for observability.
-    """
-    return get_metrics()
-
-@app.get("/health")
-def health_check():
-    """
-    Standard health check endpoint for container orchestrators (K8s/Docker).
-    """
-    return {"status": "healthy"}
+app.include_router(health_router)
+app.include_router(metrics_router)
 
 @app.get("/")
 def read_root():
