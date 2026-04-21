@@ -22,19 +22,29 @@ from app.core.config import settings
 async def lifespan(app_instance: FastAPI):
     """
     Industry-standard startup/shutdown handling.
-    Initializes FAISS and BM25 once during application launch.
+    Performs environment validation and initializes search engines.
     """
     try:
-        logger.info("Initializing Search Engines (FAISS + BM25)...")
+        # 🔥 STEP 3: STARTUP VALIDATION (Professional Safety Gate)
+        logger.info("Validating environment...")
+        required_vars = ["GEMINI_API_KEY", "VOYAGE_API_KEY"]
+        for var in required_vars:
+            if not getattr(settings, var):
+                raise RuntimeError(f"Missing critical env variable: {var}")
+        logger.info("Environment valid ✅")
+
+        # 🚀 STEP 4: PRELOAD EVERYTHING (Professional Preloading)
+        logger.info("Loading FAISS Knowledge Base...")
         db = FAISS.load_local(
             settings.VEC_STORE_PATH,
             get_embedding_model(),
             allow_dangerous_deserialization=True
         )
         app_instance.state.db = db
+        logger.info("FAISS Loaded ✅")
 
         # Extract all documents from FAISS to initialize BM25
-        # Safely access docstore values to satisfy visibility linters
+        logger.info("Initializing BM25 Sparse Engine...")
         docstore = getattr(db, "docstore")
         raw_docs = getattr(docstore, "_dict").values()
         all_chunks = [
@@ -42,10 +52,11 @@ async def lifespan(app_instance: FastAPI):
             for d in raw_docs
         ]
         init_bm25(all_chunks)
+        logger.info("BM25 Ready ✅")
+        
         logger.info("Engines ready for production traffic.")
     except Exception as e:
         logger.error("Critical Startup Error: %s", e)
-        # In production, we might want to shut down if we can't search
         raise e
 
     yield

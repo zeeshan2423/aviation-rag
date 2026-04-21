@@ -60,7 +60,7 @@ async def chat(request: Request, chat_req: ChatRequest):
         final_context = build_context(top_chunks)
 
         # 5. LLM Answer Generation
-        answer = await generate_answer(
+        answer, is_hit = await generate_answer(
             chat_req.query,
             final_context,
             memory=chat_req.session_id
@@ -80,7 +80,7 @@ async def chat(request: Request, chat_req: ChatRequest):
         ]
 
         # 📊 Metrics Tracking
-        track_query(success=True, latency=time.time() - start_time)
+        track_query(success=True, latency=time.time() - start_time, cache_hit=is_hit)
 
         return ChatResponse(
             answer=answer,

@@ -17,13 +17,14 @@ REDIS_CLIENT = get_redis_client()
 # Production Metric Keys
 METRIC_TOTAL_QUERIES = "metrics:total_queries"
 METRIC_SUCCESS_QUERIES = "metrics:success_queries"
+METRIC_CACHE_HITS = "metrics:cache_hits"
 METRIC_LATENCY_LIST = "metrics:latency_seconds_list"
 
 
-def track_query(success: bool, latency: float) -> None:
+def track_query(success: bool, latency: float, cache_hit: bool = False) -> None:
     """
     Updates production telemetry in Redis.
-    Captures success rates and rolling average latency.
+    Captures success rates, cache efficiency, and rolling average latency.
     """
     if not REDIS_CLIENT:
         return
@@ -33,6 +34,8 @@ def track_query(success: bool, latency: float) -> None:
         REDIS_CLIENT.incr(METRIC_TOTAL_QUERIES)
         if success:
             REDIS_CLIENT.incr(METRIC_SUCCESS_QUERIES)
+        if cache_hit:
+            REDIS_CLIENT.incr(METRIC_CACHE_HITS)
 
         # Push latency (seconds) to a rolling window (last 100 queries)
         REDIS_CLIENT.lpush(METRIC_LATENCY_LIST, latency)
@@ -57,16 +60,21 @@ def get_metrics() -> Dict[str, Any]:
         successes_raw = REDIS_CLIENT.get(METRIC_SUCCESS_QUERIES)
         successes = int(successes_raw) if successes_raw else 0
 
+        hits_raw = REDIS_CLIENT.get(METRIC_CACHE_HITS)
+        hits = int(hits_raw) if hits_raw else 0
+
         # Calculate Latency Metrics
         latencies_raw = REDIS_CLIENT.lrange(METRIC_LATENCY_LIST, 0, -1)
         latencies = [float(l) for l in latencies_raw]
 
         avg_latency = sum(latencies) / len(latencies) if latencies else 0
         success_rate = (successes / total * 100) if total > 0 else 0
+        hit_rate = (hits / total * 100) if total > 0 else 0
 
         return {
             "total_queries": total,
             "success_rate_percent": round(success_rate, 2),
+            "cache_hit_rate_percent": round(hit_rate, 2),
             "avg_latency_seconds": round(avg_latency, 4),
             "telemetry_window_size": len(latencies),
             "status": "Healthy"

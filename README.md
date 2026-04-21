@@ -1,149 +1,91 @@
-# ✈️ Aviation SOP Conversational RAG System
+# ✈️ Aviation SOP RAG Platform
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100.0+-009688.svg)](https://fastapi.tiangolo.com/)
-
-A production-grade, domain-specific conversational AI system built using **Retrieval-Augmented Generation (RAG)** for aviation Standard Operating Procedures (SOPs). This system delivers high-precision, grounded, and traceable answers by combining advanced retrieval strategies with deterministic safety gates.
+A production-hardened, high-precision Retrieval-Augmented Generation (RAG) system engineered for Aviation Standard Operating Procedures (SOPs). Built with professional standards for reliability, auditability, and observability.
 
 ---
 
-## 🚀 Key Features
+## 🏗️ System Architecture
 
-*   **Structured PDF Ingestion**: Section and subsection-aware parsing for granular context.
-*   **Hybrid Retrieval Engine**: Dual-stream search combining **FAISS** (Semantic/Dense) and **BM25** (Keyword/Sparse) for 100% recall of technical acronyms (SOP, PM, etc.).
-*   **Precision Reranking**: Integrated `CrossEncoder` rescoring with custom **Section-Based Boosting** to prioritize technical chapters over summaries.
-*   **Safety Gate (Deterministic)**: Automated confidence thresholding to prevent hallucinations for out-of-scope queries.
-*   **Production Caching**: Multi-layer Redis caching with **Distributed Locking** to prevent cache stampedes.
-*   **Observability Dashboard**: Built-in `/metrics` endpoint for real-time tracking of latency, cache efficiency, and query volume.
-
----
-
-## 🧠 Architecture
+The platform follows a strictly modular, multi-stage pipeline designed to maximize recall and precision while ensuring production safety.
 
 ```mermaid
 graph TD
-    A[User Query] --> B[Session Memory Context]
-    B --> C[Query Rewriting - Gemini 3.1 Flash]
-    C --> D{Hybrid Retrieval}
-    D --> E[FAISS - Dense Search]
-    D --> F[BM25 - Sparse Search]
-    E --> G[Candidate Deduplication]
-    F --> G
-    G --> H[Cross-Encoder Reranking]
-    H --> I[Section-Based Boosting]
-    I --> J{Confidence Gate}
-    J -- Score < 2.0 --> K[Reject: Not Found in SOP]
-    J -- Score > 2.0 --> L[Context Builder]
-    L --> M[LLM Generation - Gemini 3.1 Flash]
-    M --> N[Answer + Verified Sources]
+    User([User Query]) --> Rewriter[Query Rewriter / LLM]
+    Rewriter --> Hybrid[Hybrid Search Engine]
+    Hybrid --> Dense[FAISS - Dense Vector Store]
+    Hybrid --> Sparse[BM25 - Sparse Word Match]
+    Dense --> Candidates[Candidate Selection]
+    Sparse --> Candidates
+    Candidates --> Reranker[Cross-Encoder Reranker]
+    Reranker --> Gate{Confidence Gate}
+    Gate -- Score < 2.0 --> Reject[Safety Rejection]
+    Gate -- Score >= 2.0 --> Build[Context Builder]
+    Build --> Generator[Gemini 1.5 Flash]
+    Generator --> Response([Production Grounded Answer])
+    
+    subgraph Observability
+        Response --> Metrics[Redis Telemetry]
+        Response --> Cache[Redis Cache]
+    end
 ```
 
 ---
 
-## 📁 Project Structure
+## 🚀 Professional Setup
 
-```text
-aviation-rag/
-├── app/
-│   ├── api/                # API Endpoints (FastAPI)
-│   ├── models/             # Pydantic Schemas
-│   ├── services/           # Core Logic (LLM, Retrieval, Reranking)
-│   │   ├── metrics.py      # Observability & Monitoring
-│   │   ├── hybrid.py       # FAISS + BM25 Orchestration
-│   │   └── cache.py        # Redis Locking & Key Logic
-│   ├── utils/              # Data Processing Pipelines
-│   └── main.py             # App Entry Point
-├── data/                   # Knowledge Base (Raw & Processed)
-├── scripts/                # Data Ingestion & Benchmarking
-└── requirements.txt        # Production Dependencies
-```
+This repository is engineered for a seamless developer experience using standard automation patterns.
 
----
-
-## ⚙️ Setup Instructions
-
-### 1. Prerequisites
-- **Python 3.10+**
-- **Redis Service** (Running on `localhost:6379`)
-
-### 2. Installation
+### 1. Environment Configuration
+Standardize your environment by creating a `.env` file from the provided template:
 ```bash
-git clone https://github.com/zeeshan2423/aviation-rag.git
-cd aviation-rag
-pip install -r requirements.txt
+cp .env.example .env
+# Open .env and add your GEMINI_API_KEY and VOYAGE_API_KEY
 ```
 
-### 3. Environment Variables
-Create a `.env` file in the root directory:
-```env
-GOOGLE_API_KEY=your_gemini_api_key
-VOYAGE_API_KEY=your_voyage_api_key
-REDIS_HOST=localhost
-REDIS_PORT=6379
-HF_TOKEN=optional_for_faster_downloads
-```
-
-### 4. Data Ingestion
-Populate the vector store and BM25 index:
+### 2. Knowledge Base Initialization
+Cleanse and ingest the aviation knowledge base using the optimized pipeline:
 ```bash
-python scripts/ingest.py
+make ingest
 ```
 
-### 5. Launch Application
+### 3. Deployment
+Launch the full stack (API + Redis) using Docker Compose:
 ```bash
-uvicorn app.main:app --port 8000
+make docker-up
 ```
 
 ---
 
-## 🧪 API Usage & Monitoring
+## 🛠️ Developer Interface (Makefile)
 
-### POST `/chat`
-**Request:**
-```json
-{
-  "query": "What are the responsibilities of Pilot Monitoring?",
-  "session_id": "pilot_001"
-}
-```
+Standardize your workflow with the built-in `Makefile`:
 
-**Response:**
-```json
-{
-  "answer": "The PM is responsible for monitoring flight path, systems...",
-  "sources": [
-    { "section": "1. PURPOSE", "chunk_id": "sop_12" }
-  ]
-}
-```
-
-### GET `/metrics`
-Exposes real-time production performance data:
-- `total_queries`: Total requests served.
-- `avg_latency_ms`: Rolling window average response time.
-- `cache_hit_rate`: Success rate of the Redis caching layer.
+- `make run`: Launch the development server with hot-reload.
+- `make ingest`: Execute the full document ingestion and vectorization pipeline.
+- `make docker-up`: Spin up the production-ready containerized stack.
+- `make docker-down`: Gracefully shut down all services.
+- `make logs`: Monitor real-time logs from the containerized API.
 
 ---
 
-## 🔐 Safety & Reliability
+## 📈 Observability & Interview Gold
 
-Our system implements a **Dual-Threshold Security Gate**:
-*   **Threshold < 2.0**: The system returns a deterministic "Not found in SOP" to prevent hallucinations when the context is irrelevant.
-*   **Threshold 2.0 - 5.0**: The response is provided but includes a precision warning: *"NOTE: This information may be incomplete."*
-*   **Threshold > 5.0**: Full confidence response with direct source attribution.
-
----
-
-## 📊 Example Benchmarks
-
-| Query Type | System Behavior | Score Range |
-| :--- | :--- | :--- |
-| **Direct SOP Query** | ✅ Precise Answer | 6.0+ |
-| **Vague/Acronym** | ✅ Hybrid Recall (PM/SOP) | 3.0 - 5.0 |
-| **Out of Scope** | ❌ Deterministic Reject | < 1.0 |
+The platform features an enterprise-grade observability suite:
+- **Health Checks**: `GET /health` for operational readiness.
+- **Advanced Telemetry**: `GET /metrics` provides real-time Success Rates, Cache Hit Ratios, and rolling Window Latency.
+- **Production Logging**: Structured logging respects `LOG_LEVEL` environment settings.
 
 ---
 
-> [!NOTE]
-> This system is designed for **Pilot Training** and **Simulation Support**. Always refer to official FAA/Airline documentation for real-world flight operations.
+## 💎 System Design Rationale
+
+- **Hybrid Retrieval**: Combines semantically rich dense embeddings with keyword-exact sparse matching (BM25) to satisfy strict aviation precision requirements.
+- **Confidence Gating**: Implements a Rerank Confidence Gate (threshold: 2.0) to prevent hallsucinations and ensure the model only answers when high-quality evidence is found.
+- **Cache Stampede Protection**: Uses explicit Redis locking to ensure efficient performance under high concurrent load.
+- **Lifespan Initialization**: Preloads all heavy resources (FAISS indices, encoders) into memory during startup to eliminate cold-query latency.
+
+---
+
+### 🛡️ Maintenance Scripts
+- `scripts/reset.sh`: Clears the local vector database for clean re-ingestions.
+- `scripts/rebuild.sh`: Automatically runs ingestion and relaunches the entire Docker stack.

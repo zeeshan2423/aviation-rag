@@ -25,10 +25,11 @@ llm = ChatGoogleGenerativeAI(
 )
 
 
-async def generate_answer(query: str, context: str, memory: Optional[Any] = None) -> str:
+async def generate_answer(query: str, context: str, memory: Optional[Any] = None) -> tuple[str, bool]:
     """
     Generates an answer using the Gemini model based on context and query.
     Includes production refinements: Locking, Negative Caching, and type-safe responses.
+    Returns (answer, is_cache_hit).
     """
     # ⚙️ 1. Generate Robust Key
     key = make_llm_key(query, context, memory, settings.LLM_MODEL_NAME)
@@ -39,14 +40,14 @@ async def generate_answer(query: str, context: str, memory: Optional[Any] = None
 
         if cached_val:
             logger.info("Cache hit for LLM response.")
-            return str(cached_val)
+            return str(cached_val), True
 
         if not should_compute:
             # 🕒 Briefly wait and retry once if another process is computing
             await asyncio.sleep(0.2)
             cached_val = get_cache(key)
             if cached_val:
-                return str(cached_val)
+                return str(cached_val), True
     except redis.RedisError as e:
         # Non-blocking cache layer should fallback to computation
         logger.warning("Cache lookup failed, falling back to live computation: %s", e)
@@ -72,13 +73,13 @@ async def generate_answer(query: str, context: str, memory: Optional[Any] = None
             ttl = 600  # Negative caching: 10 mins for missing info
 
         set_cache(key, answer, ttl=ttl)
-        return answer
+        return answer, False
 
     except (ValueError, TypeError, redis.RedisError) as e:
         # Standardized error reporting for known potential failure points
         logger.error("LLM Generation Failed (Infrastructure/Data): %s", e, exc_info=True)
-        return "I'm sorry, an internal reasoning error occurred. Please try again shortly."
+        return "I'm sorry, an internal reasoning error occurred. Please try again shortly.", False
     except RuntimeError as e:
         # Final safety net for unexpected issues (Standardized for Production)
         logger.error("Unexpected LLM Generation Failure: %s", e, exc_info=True)
-        return "An unexpected error occurred. Please try again."
+        return "An unexpected error occurred. Please try again.", False
