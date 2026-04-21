@@ -25,7 +25,11 @@ llm = ChatGoogleGenerativeAI(
 )
 
 
-async def generate_answer(query: str, context: str, memory: Optional[Any] = None) -> tuple[str, bool]:
+async def generate_answer(
+    query: str,
+    context: str,
+    memory: Optional[Any] = None
+) -> tuple[str, bool]:
     """
     Generates an answer using the Gemini model based on context and query.
     Includes production refinements: Locking, Negative Caching, and type-safe responses.

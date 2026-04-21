@@ -53,7 +53,7 @@ async def lifespan(app_instance: FastAPI):
         ]
         init_bm25(all_chunks)
         logger.info("BM25 Ready ✅")
-        
+
         logger.info("Engines ready for production traffic.")
     except Exception as e:
         logger.error("Critical Startup Error: %s", e)
