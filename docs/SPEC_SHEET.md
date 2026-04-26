@@ -47,15 +47,16 @@ To build a **production-grade conversational AI system** specifically engineered
 *   **Configuration**: Temperature=0.0 for deterministic output. Structured JSON schema return including `confidence` and `retrieval_score`.
 
 ### 8. Production Performance Layer
-*   **Observability**: Integrated `/metrics` endpoint tracking rolling latencies, cache efficiency, and **retrieval quality logs**.
-*   **Caching**: Redis-backed with **distributed locking** to prevent cache stampedes during high-load events.
-*   **API Performance**: Parallelized multi-query execution and pruned reranking.
+*   **Observability**: Integrated `/metrics` endpoint and **Deep Feedback Pipeline** logging full-context failures into Redis.
+*   **Caching**: Redis-backed with distributed locking.
+*   **API Performance**: Parallelized multi-query execution, pruned reranking, and sub-millisecond rule-based guardrails.
 
-### 9. Safety & Determinism Layer
-Our system is governed by a **Dual-Threshold Security Gate**:
-*   **Absolute Reject (< 2.0)**: If the Top-1 rerank score is below 2.0, the query is rejected as "Not found in SOP".
-*   **Precision Warning (2.0 - 5.0)**: Answers are provided but appended with a safety note indicating potential incompleteness.
-*   **High Confidence (> 5.0)**: Standard response with full source validation.
+### 9. Safety & Determinism Layer (Phase 3)
+Our system is governed by a **Tiered Precision & Safety Gate**:
+*   **Absolute Reject (< 0.3 Confidence)**: Triggered if normalized rerank score is < 0.3. Response: "Not found in SOP". Automatically logs to Feedback Pipeline.
+*   **Cautionary UX (0.3 - 0.6 Confidence)**: Returns answer with a mandatory `warning` field and log trigger.
+*   **Confident Answer (> 0.6 Confidence)**: Standard response with full source validation.
+*   **Guardrail Interceptor**: Post-generation check that scans for uncertainty patterns (e.g., "I think"), missing sources, and response quality. Disables/Flags ungrounded outputs.
 
 ### 10. Production Dependency Stack
 *   **API Framework**: FastAPI / Uvicorn

@@ -72,8 +72,17 @@ To handle complex, multi-intent aviation questions, we implement a **Gated Decom
 ### 3. Recall-First Pruning & Reranking
 To maintain sub-second performance without sacrificing precision, we implement a **Candidate Pruning** layer. Multi-query results are merged using **Min-Max Score Normalization** and pruned to the Top-50 candidates before being processed by the heavy Cross-Encoder. This ensures the reranker focuses its computational budget only on the highest-potential chunks.
 
-### 4. Decision Logic & Safety (Determinism)
-Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **hard safety gate** at the reranking stage. By using a Cross-Encoder as a "Referee", we can deterministically reject queries with low relevance scores, effectively eliminating hallucination risks for out-of-scope requests.
+### 4. Signal-Based Guardrails (Safety Interceptor)
+To ensure high-assurance responses, the system implements a **Post-Generation Guardrail Layer**. This layer performs fast, rule-based checks on the LLM output, verifying source attribution, scanning for uncertainty patterns (e.g., "I think"), and validating answer length. Instead of hard overrides, it "wraps" responses with safety warnings when signals are moderate.
+
+### 5. Deep Feedback Pipeline (System Learning)
+The system is designed to be **self-correcting**. Every low-confidence rejection or guardrail failure triggers a **Deep Context Log** in Redis. This log captures the original query, retrieved chunks, rerank scores, and the generated answer, providing the essential data needed for root-cause analysis and future model fine-tuning or prompt refinement.
+
+### 6. Decision Logic & Safety (Tiered UX)
+Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **three-tier safety gate**:
+- **Reject (< 0.3)**: Absolute fallback for low-relevance results.
+- **Caution (0.3 - 0.6)**: Response delivered with a `warning` flag for moderate grounding.
+- **Confident (> 0.6)**: Full-assurance output with verified source citations.
 
 ### 3. Conversational Intelligence
 The **Query Rewriting** layer utilizes **Gemini 1.5 Flash** to transform ambiguous, multi-turn user queries into self-contained retrieval statements. This ensures that retrieval always targeted the original intent, even when users use pronouns like "it" or "their".
