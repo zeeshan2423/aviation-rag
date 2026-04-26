@@ -101,6 +101,27 @@ The platform features an enterprise-grade observability suite:
 
 ---
 
+## 🚀 Deployment
+
+The system is fully containerized for production readiness.
+
+### Prerequisites
+- Docker & Docker Compose
+- `.env` file populated with API keys
+
+### Launching the Stack
+Spin up the API and Redis services:
+```bash
+docker-compose up -d --build
+```
+
+The API will be available at `http://localhost:8000`. You can verify readiness via:
+```bash
+curl http://localhost:8000/health
+```
+
+---
+
 ## 🧪 Evaluation Suite
 
 The platform includes a dedicated discovery and evaluation framework to measure system accuracy and retrieval precision.

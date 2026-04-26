@@ -51,12 +51,16 @@ To build a **production-grade conversational AI system** specifically engineered
 *   **Caching**: Redis-backed with distributed locking.
 *   **API Performance**: Parallelized multi-query execution, pruned reranking, and sub-millisecond rule-based guardrails.
 
-### 9. Safety & Determinism Layer (Phase 3)
-Our system is governed by a **Tiered Precision & Safety Gate**:
-*   **Absolute Reject (< 0.3 Confidence)**: Triggered if normalized rerank score is < 0.3. Response: "Not found in SOP". Automatically logs to Feedback Pipeline.
-*   **Cautionary UX (0.3 - 0.6 Confidence)**: Returns answer with a mandatory `warning` field and log trigger.
+### 9. Safety & Determinism Layer (Phase 3.1)
+Our system is governed by a **Tiered Precision & Safety Gate** powered by **Composite Confidence**:
+*   **Composite Confidence Calculation**: 
+    - `0.6 * Normalized Rerank Score`
+    - `0.2 * Source Count Signal` (2+ sources = 100%)
+    - `0.2 * Answer Length Signal` (50+ words = 100%)
+*   **Absolute Reject (< 0.3 Confidence)**: Returns "Not found in SOP" and triggers a failure log.
+*   **Cautionary UX (0.3 - 0.6 Confidence)**: Returns answer with a **Structured Warning Object** (`type`, `message`).
 *   **Confident Answer (> 0.6 Confidence)**: Standard response with full source validation.
-*   **Guardrail Interceptor**: Post-generation check that scans for uncertainty patterns (e.g., "I think"), missing sources, and response quality. Disables/Flags ungrounded outputs.
+*   **Guardrail Interceptor**: Rule-based post-validation scanning for uncertainty patterns and grounding. Populates the structured warning field on failure.
 
 ### 10. Production Dependency Stack
 *   **API Framework**: FastAPI / Uvicorn

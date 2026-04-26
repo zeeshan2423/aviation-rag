@@ -79,9 +79,9 @@ To ensure high-assurance responses, the system implements a **Post-Generation Gu
 The system is designed to be **self-correcting**. Every low-confidence rejection or guardrail failure triggers a **Deep Context Log** in Redis. This log captures the original query, retrieved chunks, rerank scores, and the generated answer, providing the essential data needed for root-cause analysis and future model fine-tuning or prompt refinement.
 
 ### 6. Decision Logic & Safety (Tiered UX)
-Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **three-tier safety gate**:
+Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **three-tier safety gate** powered by a **Composite Confidence Model**:
 - **Reject (< 0.3)**: Absolute fallback for low-relevance results.
-- **Caution (0.3 - 0.6)**: Response delivered with a `warning` flag for moderate grounding.
+- **Caution (0.3 - 0.6)**: Response delivered with a **Structured Warning Object** (`LOW_CONFIDENCE`, `UNCERTAIN_LANGUAGE`, etc.).
 - **Confident (> 0.6)**: Full-assurance output with verified source citations.
 
 ### 3. Conversational Intelligence
