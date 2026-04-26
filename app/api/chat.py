@@ -44,7 +44,8 @@ async def chat(request: Request, chat_req: ChatRequest):
         sub_queries = await decompose_query(rewritten_root)
         
         # 3. Multi-Query Hybrid Retrieval (Parallelized across sub-queries)
-        retrieval_tasks = [hybrid_retrieve(q, db, k=10) for q in sub_queries]
+        # Increase k to ensure high recall before pruning
+        retrieval_tasks = [hybrid_retrieve(q, db, k=20) for q in sub_queries]
         results_per_query = await asyncio.gather(*retrieval_tasks)
         
         all_candidates = []
@@ -57,9 +58,14 @@ async def chat(request: Request, chat_req: ChatRequest):
                     seen_chunk_ids.add(cid)
                     all_candidates.append(cand)
 
+        # ✂️ CANDIDATE PRUNING: Top-50 recall optimization
+        # Sort by raw score descending (assuming higher is better for hybrid)
+        all_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+        pruned_candidates = all_candidates[:50]
+
         # 4. Reranking (Precision booster)
         # Rescore relative to the rewritten root intended query
-        reranked_chunks = rerank(rewritten_root, all_candidates)
+        reranked_chunks = rerank(rewritten_root, pruned_candidates)
         
         # 📊 Logging Retrieval Quality for Phase 3 Feedback Loop
         log_retrieval(
