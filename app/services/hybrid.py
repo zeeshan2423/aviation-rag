@@ -48,47 +48,64 @@ def init_bm25(all_chunks: List[Dict[str, Any]]) -> None:
     HybridSearchOrchestrator.initialize_bm25(all_chunks)
 
 
-def hybrid_retrieve(query: str, db: FAISS, k: int = 10) -> List[Dict[str, Any]]:
-    """
-    Orchestrates a hybrid search combining Semantic (Dense) and Keyword (Sparse) retrieval.
-    Includes chunk-level deduplication and strict type-safe results.
-    """
-    results: List[Dict[str, Any]] = []
-    seen_chunk_ids: Set[str] = set()
+import asyncio
 
-    # 1. Execute FAISS Semantic Search
+def _faiss_search(query: str, db: FAISS, k: int) -> List[Dict[str, Any]]:
+    """Internal sync helper for semantic search."""
+    results = []
     try:
         faiss_results = db.similarity_search_with_score(query, k=k)
         for doc, score in faiss_results:
-            chunk_id = doc.metadata.get("chunk_id")
-            if chunk_id and chunk_id not in seen_chunk_ids:
-                seen_chunk_ids.add(chunk_id)
-                results.append({
-                    "text": doc.page_content,
-                    "metadata": doc.metadata,
-                    "score": float(score)  # Cast to Python float for JSON compatibility
-                })
+            results.append({
+                "text": doc.page_content,
+                "metadata": doc.metadata,
+                "score": float(score)
+            })
     except (RuntimeError, ValueError) as e:
         logger.warning("Failure in semantic FAISS retrieval: %s", e)
+    return results
 
-    # 2. Execute BM25 Keyword Search
+
+def _bm25_search(query: str, k: int) -> List[Dict[str, Any]]:
+    """Internal sync helper for keyword search."""
+    results = []
     bm25 = HybridSearchOrchestrator.get_bm25()
     if bm25:
         try:
             bm_results = bm25.search(query, k=k)
             for d in bm_results:
-                chunk_id = d["metadata"].get("chunk_id")
-                if chunk_id and chunk_id not in seen_chunk_ids:
-                    seen_chunk_ids.add(chunk_id)
-                    results.append({
-                        "text": d["text"],
-                        "metadata": d["metadata"],
-                        "score": float(d.get("score", 0.0))
-                    })
+                results.append({
+                    "text": d["text"],
+                    "metadata": d["metadata"],
+                    "score": float(d.get("score", 0.0))
+                })
         except (KeyError, ValueError, RuntimeError) as e:
             logger.warning("Failure in keyword BM25 retrieval: %s", e)
     else:
         logger.warning("BM25 Engine not initialized, skipping sparse retrieval.")
+    return results
 
-    logger.debug("Hybrid retrieval finished with %d deduplicated candidates.", len(results))
+
+async def hybrid_retrieve(query: str, db: FAISS, k: int = 10) -> List[Dict[str, Any]]:
+    """
+    Orchestrates a parallel hybrid search combining Semantic (Dense) and Keyword (Sparse) retrieval.
+    Uses asyncio.to_thread for safe execution of CPU/IO bound retrieval tasks.
+    """
+    # Execute both searches in parallel using threads
+    faiss_task = asyncio.to_thread(_faiss_search, query, db, k)
+    bm25_task = asyncio.to_thread(_bm25_search, query, k)
+    
+    dense_results, sparse_results = await asyncio.gather(faiss_task, bm25_task)
+    
+    # Merge and deduplicate
+    results: List[Dict[str, Any]] = []
+    seen_chunk_ids: Set[str] = set()
+    
+    for cand in dense_results + sparse_results:
+        chunk_id = cand["metadata"].get("chunk_id")
+        if chunk_id and chunk_id not in seen_chunk_ids:
+            seen_chunk_ids.add(chunk_id)
+            results.append(cand)
+
+    logger.debug("Parallel hybrid retrieval finished with %d candidates.", len(results))
     return results

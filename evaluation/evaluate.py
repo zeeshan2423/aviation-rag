@@ -73,7 +73,7 @@ async def run_evaluation():
 
         # 1. Pipeline Execution
         rewritten = await rewrite_query(question, "eval_session")
-        candidates = hybrid_retrieve(rewritten, db)
+        candidates = await hybrid_retrieve(rewritten, db)
         reranked = rerank(rewritten, candidates)
         top_chunks = reranked[:3]
 

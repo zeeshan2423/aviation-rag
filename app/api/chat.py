@@ -4,6 +4,7 @@ Handles conversational RAG flow: rewriting, hybrid retrieval, reranking, and gen
 """
 
 import time
+import asyncio
 from typing import List
 
 from fastapi import APIRouter, Request, HTTPException
@@ -42,12 +43,14 @@ async def chat(request: Request, chat_req: ChatRequest):
         # 2. Query Decomposition (Controlled)
         sub_queries = await decompose_query(rewritten_root)
         
-        # 3. Multi-Query Hybrid Retrieval
+        # 3. Multi-Query Hybrid Retrieval (Parallelized across sub-queries)
+        retrieval_tasks = [hybrid_retrieve(q, db, k=10) for q in sub_queries]
+        results_per_query = await asyncio.gather(*retrieval_tasks)
+        
         all_candidates = []
         seen_chunk_ids = set()
         
-        for q in sub_queries:
-            q_candidates = hybrid_retrieve(q, db, k=10)
+        for q_candidates in results_per_query:
             for cand in q_candidates:
                 cid = cand["metadata"].get("chunk_id")
                 if cid and cid not in seen_chunk_ids:
