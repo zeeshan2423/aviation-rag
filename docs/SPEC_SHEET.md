@@ -29,8 +29,10 @@ To build a **production-grade conversational AI system** specifically engineered
 | **Keyword Search** | Exact phrase/acronym match | BM25 (Sparse Vector) |
 
 *   **Query Decomposition**: Heuristic-gated (triggered by conjunctions or questions) multi-query expansion. Breaks complex questions into max 3 standalone sub-queries.
-*   **Parallel Execution**: FAISS and BM25 search streams are executed in parallel using `asyncio.to_thread` for maximum throughput.
-*   **Candidate Pruning**: Merged results from multi-query hybrid retrieval are pruned to the **Top-50** candidates based on raw scores before passing to the reranker.
+*   **Parallel Execution**: FAISS and BM25 search streams are executed in parallel using `asyncio.to_thread` with a global **Semaphore(4)** for backpressure control.
+*   **Timeout & Resilience**: Strict **5.0s timeout** per retrieval task. Partial failures (e.g., BM25 delay) return empty results instead of failing the request.
+*   **Score Normalization**: Dense (L2 inversion) and Sparse (Min-Max) scores are normalized to a 0-1 scale before merging.
+*   **Candidate Pruning**: Merged results are pruned to the **Top-50** candidates based on combined normalized scores.
 
 ### 5. Reranking Layer (Precision Tier)
 *   **Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2`

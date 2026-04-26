@@ -85,8 +85,9 @@ The platform features an enterprise-grade observability suite:
 ## 💎 System Design Rationale
 
 - **Heuristic-Gated Decomposition**: Detects complex, multi-intent queries and breaks them into targeted sub-queries for broader recall.
-- **Parallel Hybrid Retrieval**: Executes FAISS (Semantic) and BM25 (Keyword) streams in parallel using thread pools to minimize latency.
-- **Recall-First Pruning**: Merges multi-query results and prunes to the Top-50 most relevant candidates before high-cost reranking.
+- **Parallel Hybrid Retrieval**: Executes FAISS (Semantic) and BM25 (Keyword) streams in parallel using thread pools and **backpressure-controlled semaphores** (max 4) to prevent resource exhaustion.
+- **Fault-Tolerant Execution**: Implements strict **5.0s timeouts** and partial failure handling to ensure API availability even if individual retrieval components hang.
+- **Recall-First Pruning**: Merges multi-query results and prunes to the Top-50 most relevant candidates based on **normalized hybrid scores**.
 - **Confidence Gating**: Implements a Rerank Confidence Gate (threshold: 2.0) and a Warning Gate (5.0) to ensure the model only answers when evidence is high-density.
 - **Ranking-Preserved Compaction**: Strict token-aware context building (max 3,000 tokens) that maintains rerank signal while preventing context overflow.
 

@@ -64,13 +64,13 @@ flowchart TD
 ## 🧠 Core Design Principles
 
 ### 1. Hybrid Retrieval (Parallel Scaling)
-We combine **Semantic Similarity** (FAISS) with **Keyword Correspondence** (BM25). To minimize latency, we execute these retrieval streams in parallel using `asyncio.to_thread`. This allows the system to utilize multi-core processing for CPU-bound keyword search while simultaneously awaiting IO-bound vector results.
+We combine **Semantic Similarity** (FAISS) with **Keyword Correspondence** (BM25). To minimize latency, we execute these retrieval streams in parallel using `asyncio.to_thread`. To ensure system stability, we implement a **Concurrency Semaphore (max 4)** and a **Hard Timeout (5.0s)** to prevent hanging retrieval tasks from exhausting server resources.
 
 ### 2. Heuristic Query Decomposition
 To handle complex, multi-intent aviation questions, we implement a **Gated Decomposer**. If a query contains multiple intents (detected via heuristics), the system generates targeted sub-queries. This significantly boosts recall for queries like "Explain takeoff and landing procedures".
 
 ### 3. Recall-First Pruning & Reranking
-To maintain sub-second performance without sacrificing precision, we implement a **Candidate Pruning** layer. Multi-query results are merged and pruned to the Top-50 candidates before being processed by the heavy Cross-Encoder. This ensures the reranker focuses its computational budget only on the highest-potential chunks.
+To maintain sub-second performance without sacrificing precision, we implement a **Candidate Pruning** layer. Multi-query results are merged using **Min-Max Score Normalization** and pruned to the Top-50 candidates before being processed by the heavy Cross-Encoder. This ensures the reranker focuses its computational budget only on the highest-potential chunks.
 
 ### 4. Decision Logic & Safety (Determinism)
 Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **hard safety gate** at the reranking stage. By using a Cross-Encoder as a "Referee", we can deterministically reject queries with low relevance scores, effectively eliminating hallucination risks for out-of-scope requests.
