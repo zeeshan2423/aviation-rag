@@ -44,8 +44,22 @@ async def chat(request: Request, chat_req: ChatRequest):
         sub_queries = await decompose_query(rewritten_root)
         
         # 3. Multi-Query Hybrid Retrieval (Parallelized across sub-queries)
-        # Increase k to ensure high recall before pruning
-        retrieval_tasks = [hybrid_retrieve(q, db, k=20) for q in sub_queries]
+        # 🔒 Concurrency Cap: Prevent CPU/Thread starvation
+        semaphore = asyncio.Semaphore(4)
+        
+        async def semaphored_retrieve(q):
+            async with semaphore:
+                try:
+                    # ⏱️ Timeout Strategy: Prevent hanging vector store calls
+                    return await asyncio.wait_for(hybrid_retrieve(q, db, k=20), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Retrieval timed out for sub-query: %s", q)
+                    return []
+                except Exception as e:
+                    logger.error("Retrieval failure for sub-query %s: %s", q, e)
+                    return []
+
+        retrieval_tasks = [semaphored_retrieve(q) for q in sub_queries]
         results_per_query = await asyncio.gather(*retrieval_tasks)
         
         all_candidates = []
