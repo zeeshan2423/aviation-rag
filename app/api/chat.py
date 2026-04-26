@@ -110,14 +110,24 @@ async def chat(request: Request, chat_req: ChatRequest):
         # 6. LLM Answer Generation
         answer, is_hit = await generate_answer(chat_req.query, final_context, memory=chat_req.session_id)
 
+        # 🔢 COMPOSITE CONFIDENCE CALCULATION (Phase 3.1)
+        normalized_rerank = min(1.0, max(0.0, top_score / settings.CAUTION_RERANK_SCORE))
+        source_score = min(1.0, len(source_list) / 2.0)  # 2+ sources = 100% signal
+        length_score = min(1.0, len(answer.split()) / 50.0)  # 50+ words = 100% signal
+        
+        composite_confidence = (0.6 * normalized_rerank) + (0.2 * source_score) + (0.2 * length_score)
+        confidence = float(min(1.0, max(0.0, composite_confidence)))
+
         # 🛡️ GUARDRAILS: Signal-based Post-Validation
         guardrail_result = validate_response(answer, confidence, source_list)
         final_warning = guardrail_result["warning"]
 
         # Tier 2: Cautionary UX (0.3 <= Confidence < 0.6 or Guardrail Warning)
         if not guardrail_result["is_valid"]:
-            # If guardrail says invalid (e.g. no sources), escalate to warning
-            final_warning = final_warning or "Safety check failed. Please verify with SOP."
+            # If guardrail says invalid, escalate to warning if not already set
+            if not final_warning:
+                final_warning = {"type": "GUARDRAIL_FLAG", "message": "Safety check failed. Please verify with SOP."}
+            
             log_failed_query(
                 query=rewritten_root,
                 confidence=confidence,
@@ -127,15 +137,12 @@ async def chat(request: Request, chat_req: ChatRequest):
                 rerank_scores=[c["rerank_score"] for c in reranked_chunks]
             )
 
-        # Tier 3: Confident Answer (Confidence >= 0.6)
-        # Note: If there's a warning from tiered logic or guardrail, we pass it.
-
         track_query(success=True, latency=time.time() - start_time, cache_hit=is_hit)
 
         return ChatResponse(
             answer=answer,
             sources=[SourceMetadata(**s) for s in source_list],
-            confidence=float(confidence),
+            confidence=confidence,
             retrieval_score=float(top_score),
             warning=final_warning
         )

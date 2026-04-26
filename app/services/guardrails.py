@@ -43,21 +43,21 @@ def validate_response(answer: str, confidence: float, sources: List[Any]) -> Dic
     if not checks["has_sources"]:
         is_valid = False
         reason = "missing_sources"
-        warning = "No direct SOP source found for this answer."
+        warning = {"type": "MISSING_SOURCES", "message": "No direct SOP source found for this answer."}
 
     # 2. Safety Warning: Uncertain Language
     elif not checks["no_uncertainty"]:
-        warning = "This answer contains uncertain language. Please cross-verify with original SOP."
+        warning = {"type": "UNCERTAIN_LANGUAGE", "message": "This answer contains uncertain language. Please cross-verify with original SOP."}
         reason = "uncertain_language"
 
     # 3. Quality Warning: Too short
     elif not checks["sufficient_length"]:
-        warning = "This answer is unusually brief. Full context may be missing."
+        warning = {"type": "SHORT_ANSWER", "message": "This answer is unusually brief. Full context may be missing."}
         reason = "short_answer"
 
     # 4. Confidence Warning: Medium Tier (0.3 - 0.6)
     elif not checks["high_confidence"]:
-        warning = "Confidence in this grounding is moderate. Verify details."
+        warning = {"type": "LOW_CONFIDENCE", "message": "Confidence in this grounding is moderate. Verify details."}
         reason = "medium_confidence"
 
     return {

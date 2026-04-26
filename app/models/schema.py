@@ -21,6 +21,13 @@ class SourceMetadata(BaseModel):
     subsection: Optional[str] = "N/A"
     chunk_id: str
 
+class ChatWarning(BaseModel):
+    """
+    Structured warning message for the frontend.
+    """
+    type: str = Field(..., example="LOW_CONFIDENCE")
+    message: str = Field(..., example="This information may be incomplete.")
+
 class ChatResponse(BaseModel):
     """
     Standard schema for a production chat response.
@@ -29,4 +36,4 @@ class ChatResponse(BaseModel):
     sources: List[SourceMetadata] = Field(default_factory=list)
     confidence: float = 0.0
     retrieval_score: float = 0.0
-    warning: Optional[str] = None
+    warning: Optional[ChatWarning] = None
