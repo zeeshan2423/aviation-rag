@@ -29,3 +29,4 @@ class ChatResponse(BaseModel):
     sources: List[SourceMetadata] = Field(default_factory=list)
     confidence: float = 0.0
     retrieval_score: float = 0.0
+    warning: Optional[str] = None

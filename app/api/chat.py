@@ -11,12 +11,14 @@ from fastapi import APIRouter, Request, HTTPException
 
 from app.models.schema import ChatRequest, ChatResponse, SourceMetadata
 from app.utils.limiter import limiter
-from app.services.query_rewriter import rewrite_query
+from app.services.query_rewriter import rewrite_query, decompose_query
 from app.services.hybrid import hybrid_retrieve
 from app.services.reranker import rerank
 from app.services.context_builder import build_context
 from app.services.llm import generate_answer
 from app.services.metrics import track_query, log_retrieval
+from app.services.guardrails import validate_response
+from app.services.feedback import log_failed_query
 from app.utils.logger import setup_logger
 from app.core.config import settings
 
@@ -28,29 +30,23 @@ router = APIRouter()
 async def chat(request: Request, chat_req: ChatRequest):
     """
     Main conversational endpoint with production security and precision layers.
-    Flow: Rewrite -> Decompose -> Hybrid Retrieve (multi-query) -> Rerank -> Confidence Gate -> LLM Generate.
+    Flow: Rewrite -> Decompose -> Hybrid Retrieve -> Prune -> Rerank -> LLM -> Guardrails -> Feedback.
     """
     start_time = time.time()
     db = request.app.state.db
 
     try:
-        # 1. Query Rewriting (Contextual intelligence)
-        rewritten_root = await rewrite_query(
-            chat_req.query,
-            chat_req.session_id
-        )
+        # 1. Query Rewriting
+        rewritten_root = await rewrite_query(chat_req.query, chat_req.session_id)
 
-        # 2. Query Decomposition (Controlled)
+        # 2. Query Decomposition
         sub_queries = await decompose_query(rewritten_root)
         
-        # 3. Multi-Query Hybrid Retrieval (Parallelized across sub-queries)
-        # 🔒 Concurrency Cap: Prevent CPU/Thread starvation
+        # 3. Multi-Query Hybrid Retrieval
         semaphore = asyncio.Semaphore(4)
-        
         async def semaphored_retrieve(q):
             async with semaphore:
                 try:
-                    # ⏱️ Timeout Strategy: Prevent hanging vector store calls
                     return await asyncio.wait_for(hybrid_retrieve(q, db, k=20), timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("Retrieval timed out for sub-query: %s", q)
@@ -64,7 +60,6 @@ async def chat(request: Request, chat_req: ChatRequest):
         
         all_candidates = []
         seen_chunk_ids = set()
-        
         for q_candidates in results_per_query:
             for cand in q_candidates:
                 cid = cand["metadata"].get("chunk_id")
@@ -72,61 +67,77 @@ async def chat(request: Request, chat_req: ChatRequest):
                     seen_chunk_ids.add(cid)
                     all_candidates.append(cand)
 
-        # ✂️ CANDIDATE PRUNING: Top-50 recall optimization
-        # Sort by raw score descending (assuming higher is better for hybrid)
+        # ✂️ CANDIDATE PRUNING
         all_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
         pruned_candidates = all_candidates[:50]
 
-        # 4. Reranking (Precision booster)
-        # Rescore relative to the rewritten root intended query
+        # 4. Reranking
         reranked_chunks = rerank(rewritten_root, pruned_candidates)
         
-        # 📊 Logging Retrieval Quality for Phase 3 Feedback Loop
+        # 📊 Logging Retrieval Quality
         log_retrieval(
             query=rewritten_root,
             chunks=reranked_chunks,
             rerank_scores=[c["rerank_score"] for c in reranked_chunks]
         )
 
-        # 🔥 PRODUCTION SAFETY: Confidence Threshold Gate
-        if not reranked_chunks or reranked_chunks[0]["rerank_score"] < settings.MIN_RERANK_SCORE:
-            score = reranked_chunks[0]['rerank_score'] if reranked_chunks else 0.0
-            logger.info("Query rejected by safety gate. Top score: %s", score)
+        # 🔢 Score Calculation
+        top_score = reranked_chunks[0]["rerank_score"] if reranked_chunks else 0.0
+        confidence = min(1.0, max(0.0, top_score / settings.CAUTION_RERANK_SCORE))
+
+        # 🔥 PRODUCTION SAFETY: Tiered Confidence Gates
+        # Tier 1: Absolute Reject (< 0.3 Confidence)
+        if not reranked_chunks or confidence < 0.3:
+            logger.info("Query rejected by safety gate (Low Confidence: %s)", confidence)
+            log_failed_query(
+                query=rewritten_root, 
+                confidence=confidence, 
+                reason="low_confidence_reject",
+                retrieved_chunks=reranked_chunks,
+                rerank_scores=[c["rerank_score"] for c in reranked_chunks]
+            )
             track_query(success=True, latency=time.time() - start_time)
             return ChatResponse(
                 answer="Not found in SOP",
                 sources=[],
-                confidence=0.0,
-                retrieval_score=float(score)
+                confidence=float(confidence),
+                retrieval_score=float(top_score)
             )
 
-        # 5. Context Preparation (Ranking-Preserved Compaction)
-        # build_context now handles sorting and token budget strictly
+        # 5. Context Preparation
         final_context, source_list = build_context(reranked_chunks)
 
         # 6. LLM Answer Generation
-        answer, is_hit = await generate_answer(
-            chat_req.query,
-            final_context,
-            memory=chat_req.session_id
-        )
+        answer, is_hit = await generate_answer(chat_req.query, final_context, memory=chat_req.session_id)
 
-        # ✨ DUAL THRESHOLD: Precision Warning logic
-        top_score = reranked_chunks[0]["rerank_score"]
-        if top_score < settings.CAUTION_RERANK_SCORE:
-            answer += "\n\nNOTE: This information may be incomplete."
+        # 🛡️ GUARDRAILS: Signal-based Post-Validation
+        guardrail_result = validate_response(answer, confidence, source_list)
+        final_warning = guardrail_result["warning"]
 
-        # 📊 Metrics and Scoring Mapping
-        # Normalize score for V1 confidence (e.g., 5.0+ = 100%)
-        confidence = min(1.0, max(0.0, top_score / settings.CAUTION_RERANK_SCORE))
-        
+        # Tier 2: Cautionary UX (0.3 <= Confidence < 0.6 or Guardrail Warning)
+        if not guardrail_result["is_valid"]:
+            # If guardrail says invalid (e.g. no sources), escalate to warning
+            final_warning = final_warning or "Safety check failed. Please verify with SOP."
+            log_failed_query(
+                query=rewritten_root,
+                confidence=confidence,
+                reason=guardrail_result["reason"] or "guardrail_fail",
+                answer=answer,
+                retrieved_chunks=reranked_chunks,
+                rerank_scores=[c["rerank_score"] for c in reranked_chunks]
+            )
+
+        # Tier 3: Confident Answer (Confidence >= 0.6)
+        # Note: If there's a warning from tiered logic or guardrail, we pass it.
+
         track_query(success=True, latency=time.time() - start_time, cache_hit=is_hit)
 
         return ChatResponse(
             answer=answer,
             sources=[SourceMetadata(**s) for s in source_list],
             confidence=float(confidence),
-            retrieval_score=float(top_score)
+            retrieval_score=float(top_score),
+            warning=final_warning
         )
 
     except Exception as e:
