@@ -111,3 +111,13 @@ def get_or_lock(key: str, ttl: int = 10) -> Tuple[Optional[Any], bool]:
     except redis.RedisError as e:
         logger.warning("Redis locking logic failed: %s", e)
         return None, True  # Fallback to live computation
+def close_redis():
+    """
+    Safely closes the Redis connection during shutdown.
+    """
+    if REDIS_CLIENT:
+        try:
+            REDIS_CLIENT.close()
+            logger.info("Redis connection closed successfully.")
+        except Exception as e:
+            logger.error("Error closing Redis connection: %s", e)
