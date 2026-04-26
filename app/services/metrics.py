@@ -19,6 +19,35 @@ METRIC_TOTAL_QUERIES = "metrics:total_queries"
 METRIC_SUCCESS_QUERIES = "metrics:success_queries"
 METRIC_CACHE_HITS = "metrics:cache_hits"
 METRIC_LATENCY_LIST = "metrics:latency_seconds_list"
+METRIC_RETRIEVAL_LOGS = "metrics:retrieval_logs"
+
+
+def log_retrieval(query: str, chunks: list[dict], rerank_scores: list[float]) -> None:
+    """
+    Logs raw retrieval data for auditing and future feedback loops.
+    Captures query intent and the quality of matched candidates.
+    """
+    if not REDIS_CLIENT:
+        return
+
+    import json
+    import time
+
+    payload = {
+        "timestamp": time.time(),
+        "query": query,
+        "results_count": len(chunks),
+        "top_scores": rerank_scores[:5],  # Log top 5 scores for density check
+        "chunk_ids": [c.get("metadata", {}).get("chunk_id") for c in chunks[:5]]
+    }
+
+    try:
+        # Store as a JSON string in a rolling Redis list (last 1000 logs)
+        REDIS_CLIENT.lpush(METRIC_RETRIEVAL_LOGS, json.dumps(payload))
+        REDIS_CLIENT.ltrim(METRIC_RETRIEVAL_LOGS, 0, 999)
+        logger.debug("Retrieval telemetry logged for query: %s", query)
+    except redis.RedisError as e:
+        logger.warning("Retrieval logging failed: %s", e)
 
 
 def track_query(success: bool, latency: float, cache_hit: bool = False) -> None:

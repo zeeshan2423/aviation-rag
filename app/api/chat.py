@@ -15,7 +15,7 @@ from app.services.hybrid import hybrid_retrieve
 from app.services.reranker import rerank
 from app.services.context_builder import build_context
 from app.services.llm import generate_answer
-from app.services.metrics import track_query
+from app.services.metrics import track_query, log_retrieval
 from app.utils.logger import setup_logger
 from app.core.config import settings
 
@@ -27,39 +27,61 @@ router = APIRouter()
 async def chat(request: Request, chat_req: ChatRequest):
     """
     Main conversational endpoint with production security and precision layers.
-    Flow: Rewrite -> Hybrid Retrieve -> Rerank -> Confidence Gate -> LLM Generate.
+    Flow: Rewrite -> Decompose -> Hybrid Retrieve (multi-query) -> Rerank -> Confidence Gate -> LLM Generate.
     """
     start_time = time.time()
+    db = request.app.state.db
 
     try:
         # 1. Query Rewriting (Contextual intelligence)
-        rewritten_query = await rewrite_query(
+        rewritten_root = await rewrite_query(
             chat_req.query,
             chat_req.session_id
         )
 
-        # 2. Hybrid Retrieval (Recall booster)
-        db = request.app.state.db
-        candidates = hybrid_retrieve(rewritten_query, db)
+        # 2. Query Decomposition (Controlled)
+        sub_queries = await decompose_query(rewritten_root)
+        
+        # 3. Multi-Query Hybrid Retrieval
+        all_candidates = []
+        seen_chunk_ids = set()
+        
+        for q in sub_queries:
+            q_candidates = hybrid_retrieve(q, db, k=10)
+            for cand in q_candidates:
+                cid = cand["metadata"].get("chunk_id")
+                if cid and cid not in seen_chunk_ids:
+                    seen_chunk_ids.add(cid)
+                    all_candidates.append(cand)
 
-        # 3. Reranking (Precision booster)
-        reranked_chunks = rerank(rewritten_query, candidates)
+        # 4. Reranking (Precision booster)
+        # Rescore relative to the rewritten root intended query
+        reranked_chunks = rerank(rewritten_root, all_candidates)
+        
+        # 📊 Logging Retrieval Quality for Phase 3 Feedback Loop
+        log_retrieval(
+            query=rewritten_root,
+            chunks=reranked_chunks,
+            rerank_scores=[c["rerank_score"] for c in reranked_chunks]
+        )
 
         # 🔥 PRODUCTION SAFETY: Confidence Threshold Gate
         if not reranked_chunks or reranked_chunks[0]["rerank_score"] < settings.MIN_RERANK_SCORE:
-            score = reranked_chunks[0]['rerank_score'] if reranked_chunks else 'N/A'
+            score = reranked_chunks[0]['rerank_score'] if reranked_chunks else 0.0
             logger.info("Query rejected by safety gate. Top score: %s", score)
             track_query(success=True, latency=time.time() - start_time)
             return ChatResponse(
                 answer="Not found in SOP",
-                sources=[]
+                sources=[],
+                confidence=0.0,
+                retrieval_score=float(score)
             )
 
-        # 4. Context Preparation
-        top_chunks = reranked_chunks[:3]
-        final_context = build_context(top_chunks)
+        # 5. Context Preparation (Ranking-Preserved Compaction)
+        # build_context now handles sorting and token budget strictly
+        final_context, source_list = build_context(reranked_chunks)
 
-        # 5. LLM Answer Generation
+        # 6. LLM Answer Generation
         answer, is_hit = await generate_answer(
             chat_req.query,
             final_context,
@@ -67,24 +89,21 @@ async def chat(request: Request, chat_req: ChatRequest):
         )
 
         # ✨ DUAL THRESHOLD: Precision Warning logic
-        if reranked_chunks[0]["rerank_score"] < settings.CAUTION_RERANK_SCORE:
+        top_score = reranked_chunks[0]["rerank_score"]
+        if top_score < settings.CAUTION_RERANK_SCORE:
             answer += "\n\nNOTE: This information may be incomplete."
 
-        # 6. Response Formatting
-        sources: List[SourceMetadata] = [
-            SourceMetadata(
-                section=c["metadata"].get("section", "Unknown"),
-                subsection=c["metadata"].get("subsection", "Unknown"),
-                chunk_id=c["metadata"].get("chunk_id", "Unknown")
-            ) for c in top_chunks
-        ]
-
-        # 📊 Metrics Tracking
+        # 📊 Metrics and Scoring Mapping
+        # Normalize score for V1 confidence (e.g., 5.0+ = 100%)
+        confidence = min(1.0, max(0.0, top_score / settings.CAUTION_RERANK_SCORE))
+        
         track_query(success=True, latency=time.time() - start_time, cache_hit=is_hit)
 
         return ChatResponse(
             answer=answer,
-            sources=sources
+            sources=[SourceMetadata(**s) for s in source_list],
+            confidence=float(confidence),
+            retrieval_score=float(top_score)
         )
 
     except Exception as e:
