@@ -16,13 +16,23 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger("llm_service")
 
-# Initialize the Gemini model using centralized settings
-# Using Gemini 3.1 Flash as identified in technical specifications
-llm = ChatGoogleGenerativeAI(
-    model=settings.LLM_MODEL_NAME,
-    google_api_key=settings.GEMINI_API_KEY,
-    temperature=0
-)
+def get_llm(provider: str = "gemini", temperature: float = 0.0):
+    """
+    Model Abstraction Factory.
+    Centralizes LLM initialization and allows for easy provider swapping.
+    """
+    if provider == "gemini":
+        return ChatGoogleGenerativeAI(
+            model=settings.LLM_MODEL_NAME,
+            google_api_key=settings.GEMINI_API_KEY,
+            temperature=temperature
+        )
+    # Placeholder for future providers (e.g., Anthropic, OpenAI)
+    raise ValueError(f"LLM Provider '{provider}' not supported.")
+
+
+# Initialize the default model
+llm = get_llm()
 
 
 async def generate_answer(

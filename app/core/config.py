@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     MIN_RERANK_SCORE: float = 2.0
     CAUTION_RERANK_SCORE: float = 5.0
 
+    # Retrieval & Decomposition
+    MAX_SUB_QUERIES: int = 3
+    MAX_CONTEXT_TOKENS: int = 3000
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

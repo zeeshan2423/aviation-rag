@@ -12,12 +12,56 @@ from app.services.memory_store import get_history
 
 logger = setup_logger("query_rewriter")
 
-# Initialize the rewriting model
-llm = ChatGoogleGenerativeAI(
-    model=settings.LLM_MODEL_NAME,
-    google_api_key=settings.GEMINI_API_KEY,
-    temperature=0
-)
+from app.services.llm import get_llm
+
+# Initialize the rewriting model using the abstraction factory
+llm = get_llm()
+
+
+def should_decompose(query: str) -> bool:
+    """
+    Heuristic gate based on Senior Engineer specification.
+    Decomposes if query contains conjunctions or at least one question mark.
+    """
+    return any([
+        " and " in query.lower(),
+        " or " in query.lower(),
+        len(query.split("?")) > 1,
+        len(query.split(" and ")) > 1
+    ])
+
+
+async def decompose_query(query: str) -> list[str]:
+    """
+    Decomposes a complex query into simpler sub-queries for broader retrieval.
+    Includes a maximum limit of 3 sub-queries and string-based deduplication.
+    """
+    if not should_decompose(query):
+        return [query]
+
+    prompt = f"""
+    You are an Aviation SOP Query Decomposition Assistant.
+    Goal: Break down the following user query into at most {settings.MAX_SUB_QUERIES} standalone, simpler sub-queries for retrieval.
+    Rule: Return only the sub-queries, one per line. Do not add numbering or extra text.
+    
+    User Query:
+    {query}
+    
+    Sub-Queries:
+    """
+
+    try:
+        response = await llm.ainvoke(prompt)
+        sub_queries = [q.strip() for q in str(response.content).strip().split("\n") if q.strip()]
+        
+        # Deduplicate and limit to max N queries
+        unique_queries = list(dict.fromkeys(sub_queries))[:settings.MAX_SUB_QUERIES]
+        
+        logger.info("Query decomposed into: %s", unique_queries)
+        return unique_queries
+    except Exception as e:
+        logger.error("Query decomposition failed: %s", e)
+        return [query]
 
 
 async def rewrite_query(query: str, session_id: str) -> str:
