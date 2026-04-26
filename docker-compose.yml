@@ -1,37 +1,25 @@
-version: '3.8'
+version: "3.8"
 
 services:
   api:
     build: .
+    container_name: aviation-rag-api
     ports:
       - "8000:8000"
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-      - LOG_LEVEL=INFO
-      - VEC_STORE_PATH=/app/vectorstore
+    env_file:
+      - .env
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
     volumes:
       - ./vectorstore:/app/vectorstore
-    networks:
-      - aviation_net
+    restart: always
 
   redis:
     image: redis:7-alpine
+    container_name: aviation-rag-redis
     ports:
       - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - aviation_net
+    restart: always
 
-networks:
-  aviation_net:
-    driver: bridge
+volumes:
+  vectorstore:

@@ -1,32 +1,29 @@
-FROM python:3.10-slim
+# Build stage: Use python:3.11-slim for a lightweight production image
+FROM python:3.11-slim
 
-# Set environment variables for non-interactive installs and optimized performance
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV APP_HOME=/app
 
-WORKDIR /app
+# Create app directory
+WORKDIR $APP_HOME
 
-# Install system dependencies
-# build-essential is needed for potential native builds
-# libopenblas-dev is critical for FAISS-CPU performance
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (e.g., for build processes or specific libraries)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libopenblas-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Leverage Docker layer caching by installing requirements first
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application code
 COPY . .
 
-# Create a non-root user for improved security
-RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
-USER appuser
-
+# Expose the application port
 EXPOSE 8000
 
-# Entry point for the FastAPI application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application with uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
