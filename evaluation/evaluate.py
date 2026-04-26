@@ -16,8 +16,40 @@ from app.services.query_rewriter import rewrite_query
 from app.services.hybrid import hybrid_retrieve, HybridSearchOrchestrator
 from app.services.reranker import rerank
 from app.services.context_builder import build_context
-from app.services.llm import generate_answer
+from app.services.llm import generate_answer, get_llm
 from app.core.config import settings
+
+# --- Evaluation Metrics ---
+
+async def check_faithfulness(answer: str, context: str) -> int:
+    """
+    LLM-as-a-judge: Verifies if the answer is grounded in the context.
+    Returns 1 if faithful, 0 otherwise.
+    """
+    llm = get_llm()
+    prompt = f"""
+    You are an expert auditor for Aviation SOPs. 
+    Your task is to verify if the following ANSWER is strictly grounded in the provided CONTEXT.
+    
+    RULES:
+    1. If the ANSWER contains information NOT in the CONTEXT, it is NOT faithful (Output: 0).
+    2. If the ANSWER is "Not found in SOP" and the CONTEXT indeed lacks the info, it is faithful (Output: 1).
+    3. Output ONLY the number 0 or 1. No explanation.
+    
+    CONTEXT:
+    {context}
+    
+    ANSWER:
+    {answer}
+    
+    FAITHFULNESS SCORE (0 or 1):"""
+    
+    try:
+        response = await llm.ainvoke(prompt)
+        content = response.content.strip()
+        return 1 if "1" in content else 0
+    except Exception:
+        return 0
 
 # --- Setup Utilities ---
 
@@ -95,26 +127,32 @@ async def run_evaluation():
 
         # Retrieval Success: Hit in the context
         ret_success = retrieval_hit(top_chunks, expected_keywords)
+        
+        # Faithfulness: LLM-as-a-judge
+        faithfulness = await check_faithfulness(answer, context[0]) # context is (text, sources) tuple
 
         results.append({
             "question": question,
             "accuracy": accuracy,
             "retrieval_success": ret_success,
+            "faithfulness": faithfulness,
             "latency": latency,
             "cache_hit": is_hit
         })
         
         print(f"Q: {question}")
-        print(f"   Accuracy: {accuracy:.2f} | Latency: {latency:.2f}s | Retrieval Hit: {ret_success}")
+        print(f"   Accuracy: {accuracy:.2f} | Faithfulness: {faithfulness} | Latency: {latency:.2f}s | Retrieval Hit: {ret_success}")
 
     # 3. Summary Analytics
     avg_accuracy = sum(r["accuracy"] for r in results) / len(results)
     avg_latency = sum(r["latency"] for r in results) / len(results)
+    avg_faithfulness = sum(r["faithfulness"] for r in results) / len(results)
     hit_rate = sum(1 for r in results if r["retrieval_success"]) / len(results)
 
     print("\n" + "="*20 + " SUMMARY " + "="*20)
-    print(f"Avg Accuracy:    {avg_accuracy:.2f}")
-    print(f"Avg Latency:     {avg_latency:.2f}s")
+    print(f"Avg Accuracy:      {avg_accuracy:.2f}")
+    print(f"Avg Faithfulness:  {avg_faithfulness:.2f}")
+    print(f"Avg Latency:       {avg_latency:.2f}s")
     print(f"Retrieval Hit Rate: {hit_rate * 100:.1f}%")
     print("="*49)
 
