@@ -28,24 +28,26 @@ To build a **production-grade conversational AI system** specifically engineered
 | **Semantic Search** | Concept match | FAISS (Dense Vector) |
 | **Keyword Search** | Exact phrase/acronym match | BM25 (Sparse Vector) |
 
-*   **Hybrid Logic**: Results from both streams are merged and deduplicated by `chunk_id` before passing to the second-stage reranker.
+*   **Query Decomposition**: Heuristic-gated (triggered by conjunctions or questions) multi-query expansion. Breaks complex questions into max 3 standalone sub-queries.
+*   **Parallel Execution**: FAISS and BM25 search streams are executed in parallel using `asyncio.to_thread` for maximum throughput.
+*   **Candidate Pruning**: Merged results from multi-query hybrid retrieval are pruned to the **Top-50** candidates based on raw scores before passing to the reranker.
 
 ### 5. Reranking Layer (Precision Tier)
 *   **Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2`
-*   **Intelligence**: Implements **Section-Based Boosting**. Penalizes "SUMMARY" sections to ensure the primary SOP technical chapters are prioritize in the final context.
+*   **Context Compaction**: Results are sorted by `rerank_score`, deduplicated by text, and trimmed to a strict **3,000 token budget** to maintain performance.
 
 ### 6. Conversational Memory Layer
 *   **Memory Type**: Session-based windowed memory (`memory_store.py`).
-*   **Rewriting**: **Gemini 1.5 Flash** resolves multi-turn ambiguities (e.g., "its", "those procedures") by rewriting incoming queries into self-contained, context-aware retrieval queries.
+*   **Rewriting**: **Gemini 1.5 Flash** resolves multi-turn ambiguities and generates sub-queries when decomposition is triggered.
 
 ### 7. LLM Reasoning Layer
-*   **Inference Engine**: **Gemini 1.5 Flash**.
-*   **Configuration**: Temperature=0.0 for deterministic output. Strict system prompts enforce grounding (answer *only* from context) and source attribution.
+*   **Inference Engine**: **Gemini 1.5 Flash** (abstracted via `get_llm` factory).
+*   **Configuration**: Temperature=0.0 for deterministic output. Structured JSON schema return including `confidence` and `retrieval_score`.
 
 ### 8. Production Performance Layer
-*   **Observability**: Integrated `/metrics` endpoint tracking rolling latencies and cache efficiency.
+*   **Observability**: Integrated `/metrics` endpoint tracking rolling latencies, cache efficiency, and **retrieval quality logs**.
 *   **Caching**: Redis-backed with **distributed locking** to prevent cache stampedes during high-load events.
-*   **API Performance**: Full async execution path via **FastAPI**.
+*   **API Performance**: Parallelized multi-query execution and pruned reranking.
 
 ### 9. Safety & Determinism Layer
 Our system is governed by a **Dual-Threshold Security Gate**:
@@ -55,10 +57,9 @@ Our system is governed by a **Dual-Threshold Security Gate**:
 
 ### 10. Production Dependency Stack
 *   **API Framework**: FastAPI / Uvicorn
-- **Observation Engine**: SlowAPI (Rate Limiting)
-- **Infrastructure**: Redis (Metrics & Caching)
-- **Configuration Engine**: Pydantic-Settings
-- **Search Logic**: Rank_BM25 & FAISS
+*   **Inference**: Google Gemini API & VoyageAI
+*   **Observation Engine**: SlowAPI (Rate Limiting)
+*   **Infrastructure**: Redis (Metrics, Caching & Telemetry)
 
 ---
 

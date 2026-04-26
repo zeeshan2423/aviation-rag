@@ -11,21 +11,25 @@ The platform follows a strictly modular, multi-stage pipeline designed to maximi
 ```mermaid
 graph TD
     User([User Query]) --> Rewriter[Query Rewriter / LLM]
-    Rewriter --> Hybrid[Hybrid Search Engine]
-    Hybrid --> Dense[FAISS - Dense Vector Store]
-    Hybrid --> Sparse[BM25 - Sparse Word Match]
-    Dense --> Candidates[Candidate Selection]
-    Sparse --> Candidates
-    Candidates --> Reranker[Cross-Encoder Reranker]
+    Rewriter --> Decomposer{Decomposer}
+    Decomposer -- Multiple Intents --> SubQueries[Sub-Queries]
+    SubQueries --> Parallel[Parallel Hybrid Search]
+    Decomposer -- Single Intent --> Parallel
+    Parallel --> Dense[FAISS - Dense]
+    Parallel --> Sparse[BM25 - Sparse]
+    Dense --> Merge[Merge & Dedup]
+    Sparse --> Merge
+    Merge --> Pruner[Top-50 Pruning]
+    Pruner --> Reranker[Cross-Encoder Reranker]
     Reranker --> Gate{Confidence Gate}
-    Gate -- Score < 2.0 --> Reject[Safety Rejection]
-    Gate -- Score >= 2.0 --> Build[Context Builder]
-    Build --> Generator[Gemini 1.5 Flash]
+    Gate -- Low Confidence --> Reject[Safety Rejection]
+    Gate -- High Confidence --> Compact[Context Compactor]
+    Compact --> Generator[Gemini 1.5 Flash]
     Generator --> Response([Production Grounded Answer])
     
     subgraph Observability
         Response --> Metrics[Redis Telemetry]
-        Response --> Cache[Redis Cache]
+        Reranker --> Log[Retrieval Logging]
     end
 ```
 
@@ -68,21 +72,23 @@ Standardize your workflow with the built-in `Makefile`:
 
 ---
 
-## 📈 Observability & Interview Gold
+## 📈 Observability & Analytics
 
 The platform features an enterprise-grade observability suite:
 - **Health Checks**: `GET /health` for operational readiness.
 - **Advanced Telemetry**: `GET /metrics` provides real-time Success Rates, Cache Hit Ratios, and rolling Window Latency.
+- **Retrieval Logging**: Automatic telemetry for query intent and rerank scores to feed the Phase 3 feedback loop.
 - **Production Logging**: Structured logging respects `LOG_LEVEL` environment settings.
 
 ---
 
 ## 💎 System Design Rationale
 
-- **Hybrid Retrieval**: Combines semantically rich dense embeddings with keyword-exact sparse matching (BM25) to satisfy strict aviation precision requirements.
-- **Confidence Gating**: Implements a Rerank Confidence Gate (threshold: 2.0) to prevent hallsucinations and ensure the model only answers when high-quality evidence is found.
-- **Cache Stampede Protection**: Uses explicit Redis locking to ensure efficient performance under high concurrent load.
-- **Lifespan Initialization**: Preloads all heavy resources (FAISS indices, encoders) into memory during startup to eliminate cold-query latency.
+- **Heuristic-Gated Decomposition**: Detects complex, multi-intent queries and breaks them into targeted sub-queries for broader recall.
+- **Parallel Hybrid Retrieval**: Executes FAISS (Semantic) and BM25 (Keyword) streams in parallel using thread pools to minimize latency.
+- **Recall-First Pruning**: Merges multi-query results and prunes to the Top-50 most relevant candidates before high-cost reranking.
+- **Confidence Gating**: Implements a Rerank Confidence Gate (threshold: 2.0) and a Warning Gate (5.0) to ensure the model only answers when evidence is high-density.
+- **Ranking-Preserved Compaction**: Strict token-aware context building (max 3,000 tokens) that maintains rerank signal while preventing context overflow.
 
 ---
 
@@ -104,6 +110,6 @@ python evaluation/evaluate.py
 
 ### Captured Metrics
 - **Accuracy**: Measures keyword presence in the generated answer against ground-truth SOP definitions.
-- **Retrieval Hit Rate**: Quantifies the "Recall" performance by checking if the correct context chunks were present in the Top-3 results.
+- **Faithfulness**: LLM-as-a-judge metric verifying if the answer is strictly grounded in the retrieved context.
+- **Retrieval Hit Rate**: Quantifies the "Recall" performance by checking if the correct context chunks were present in the retrieval stage.
 - **End-to-End Latency**: Tracks the full pipeline execution time (Rewrite -> Retrieve -> Rerank -> LLM).
-- **Cache Hit Monitoring**: Reports whether the measurement was performed via a fresh LLM call or a cached result.

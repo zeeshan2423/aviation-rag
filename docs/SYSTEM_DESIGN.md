@@ -15,28 +15,32 @@ flowchart TD
     B --> C[Session Memory Store]
     C --> D[Query Rewriter - Gemini 1.5 Flash]
 
-    D --> E{Hybrid Retriever}
-    E --> E1[FAISS - Semantic Search]
-    E --> E2[BM25 - Keyword Search]
+    D --> E{Decomposer}
+    E -- Multi-Intent --> EQ[Sub-Queries]
+    E -- Single Intent --> EP[Parallel Hybrid Retrieval]
+    
+    EQ --> EP
+    
+    EP --> E1[FAISS - Semantic Thread]
+    EP --> E2[BM25 - Keyword Thread]
 
-    E1 --> F[Candidate Pool]
+    E1 --> F[Merge & Dedup Pool]
     E2 --> F
 
-    F --> G[Cross-Encoder Reranker]
-    G --> H[Section-Based Boosting]
+    F --> G[Top-50 Candidate Pruner]
+    G --> H[Cross-Encoder Reranker]
 
     H --> I{Threshold Gate / Safety Layer}
     I -- Score < 2.0 --> J[Reject Response]
-    I -- Score > 2.0 --> K[Context Builder]
+    I -- Score > 2.0 --> K[Ranking-Preserved Compactor]
 
     K --> L[LLM - Gemini 1.5 Flash]
-    L --> M[Response Refiner]
+    L --> M[Structured Response Factory]
 
-    M --> N[Redis Caching Layer]
-    N --> O[Production Metrics Engine]
-    O --> P[Final Response + Sources]
+    M --> N[Redis Telemetry & Cache]
+    N --> O[Final JSON Response]
 
-    P --> B
+    O --> B
 
     subgraph Data Pipeline
         Q[Raw FAA SOP PDFs]
@@ -50,7 +54,7 @@ flowchart TD
     R --> T
 
     style L fill:#f9f,stroke:#333,stroke-width:2px
-    style G fill:#bbf,stroke:#333,stroke-width:2px
+    style H fill:#bbf,stroke:#333,stroke-width:2px
     style N fill:#bfb,stroke:#333,stroke-width:2px
     style I fill:#f66,stroke:#333,stroke-width:2px
 ```
@@ -59,10 +63,16 @@ flowchart TD
 
 ## 🧠 Core Design Principles
 
-### 1. Hybrid Retrieval (Recall Maximization)
-We combine **Semantic Similarity** (FAISS) with **Keyword Correspondence** (BM25). In technical domains like aviation, semantic search alone often misses exact acronym matches (e.g., "PM" for Pilot Monitoring). Our hybrid approach ensures both conceptual and literal matches are captured.
+### 1. Hybrid Retrieval (Parallel Scaling)
+We combine **Semantic Similarity** (FAISS) with **Keyword Correspondence** (BM25). To minimize latency, we execute these retrieval streams in parallel using `asyncio.to_thread`. This allows the system to utilize multi-core processing for CPU-bound keyword search while simultaneously awaiting IO-bound vector results.
 
-### 2. Decision Logic & Safety (Determinism)
+### 2. Heuristic Query Decomposition
+To handle complex, multi-intent aviation questions, we implement a **Gated Decomposer**. If a query contains multiple intents (detected via heuristics), the system generates targeted sub-queries. This significantly boosts recall for queries like "Explain takeoff and landing procedures".
+
+### 3. Recall-First Pruning & Reranking
+To maintain sub-second performance without sacrificing precision, we implement a **Candidate Pruning** layer. Multi-query results are merged and pruned to the Top-50 candidates before being processed by the heavy Cross-Encoder. This ensures the reranker focuses its computational budget only on the highest-potential chunks.
+
+### 4. Decision Logic & Safety (Determinism)
 Unlike prototype RAG systems that rely solely on the LLM to decide relevance, our system implements a **hard safety gate** at the reranking stage. By using a Cross-Encoder as a "Referee", we can deterministically reject queries with low relevance scores, effectively eliminating hallucination risks for out-of-scope requests.
 
 ### 3. Conversational Intelligence
