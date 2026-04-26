@@ -86,10 +86,10 @@ def _bm25_search(query: str, k: int) -> List[Dict[str, Any]]:
     return results
 
 
-async def hybrid_retrieve(query: str, db: FAISS, k: int = 10) -> List[Dict[str, Any]]:
+async def hybrid_retrieve(query: str, db: FAISS, k: int = 10, alpha: float = 0.5) -> List[Dict[str, Any]]:
     """
     Orchestrates a parallel hybrid search combining Semantic (Dense) and Keyword (Sparse) retrieval.
-    Uses asyncio.to_thread for safe execution of CPU/IO bound retrieval tasks.
+    Includes Min-Max normalization to ensure unbiased merging of disparate scoring systems.
     """
     # Execute both searches in parallel using threads
     faiss_task = asyncio.to_thread(_faiss_search, query, db, k)
@@ -97,15 +97,54 @@ async def hybrid_retrieve(query: str, db: FAISS, k: int = 10) -> List[Dict[str, 
     
     dense_results, sparse_results = await asyncio.gather(faiss_task, bm25_task)
     
-    # Merge and deduplicate
+    # --- Normalization Logic ---
+    
+    # 1. Normalize Dense Scores (FAISS L2 distance -> Similarity 0-1)
+    # distance 0 = similarity 1.0; distance increases = similarity decreases
+    for d in dense_results:
+        # Simple inversion for distance-to-similarity conversion
+        d["norm_score"] = 1.0 / (1.0 + d["score"])
+
+    # 2. Normalize Sparse Scores (BM25 raw -> Similarity 0-1)
+    if sparse_results:
+        max_sparse = max(s["score"] for s in sparse_results)
+        min_sparse = min(s["score"] for s in sparse_results)
+        denom = (max_sparse - min_sparse) if max_sparse != min_sparse else 1.0
+        for s in sparse_results:
+            s["norm_score"] = (s["score"] - min_sparse) / denom
+    
+    # Merge and calculate combined score
     results: List[Dict[str, Any]] = []
     seen_chunk_ids: Set[str] = set()
     
-    for cand in dense_results + sparse_results:
+    # Process Dense
+    for cand in dense_results:
         chunk_id = cand["metadata"].get("chunk_id")
-        if chunk_id and chunk_id not in seen_chunk_ids:
+        if chunk_id:
             seen_chunk_ids.add(chunk_id)
+            cand["combined_score"] = cand["norm_score"] * alpha
+            results.append(cand)
+            
+    # Process Sparse with deduplication
+    for cand in sparse_results:
+        chunk_id = cand["metadata"].get("chunk_id")
+        if not chunk_id:
+            continue
+            
+        if chunk_id in seen_chunk_ids:
+            # Update existing candidate score
+            for existing in results:
+                if existing["metadata"].get("chunk_id") == chunk_id:
+                    existing["combined_score"] += cand["norm_score"] * (1 - alpha)
+                    break
+        else:
+            seen_chunk_ids.add(chunk_id)
+            cand["combined_score"] = cand["norm_score"] * (1 - alpha)
             results.append(cand)
 
-    logger.debug("Parallel hybrid retrieval finished with %d candidates.", len(results))
+    # Use combined_score as the final score for downstream pruning/sorting
+    for r in results:
+        r["score"] = r["combined_score"]
+
+    logger.debug("Parallel hybrid retrieval (normalized) finished with %d candidates.", len(results))
     return results
