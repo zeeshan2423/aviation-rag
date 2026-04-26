@@ -47,7 +47,8 @@ To build a **production-grade conversational AI system** specifically engineered
 *   **Configuration**: Temperature=0.0 for deterministic output. Structured JSON schema return including `confidence` and `retrieval_score`.
 
 ### 8. Production Performance Layer
-*   **Observability**: Integrated `/metrics` endpoint and **Deep Feedback Pipeline** logging full-context failures into Redis.
+*   **Observability**: Integrated **Structured JSON Logging**, **Request Correlation IDs**, and a **Deep Feedback Pipeline** logging full-context failures into Redis.
+*   **Reliability**: Robust startup lifecycle with **exponential backoff Redis retries**, granular cold-start timing, and graceful shutdown handling.
 *   **Caching**: Redis-backed with distributed locking.
 *   **API Performance**: Parallelized multi-query execution, pruned reranking, and sub-millisecond rule-based guardrails.
 

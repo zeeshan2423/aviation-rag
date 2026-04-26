@@ -90,7 +90,10 @@ The platform features an enterprise-grade observability suite:
 - **Recall-First Pruning**: Merges multi-query results and prunes to the Top-50 most relevant candidates based on **normalized hybrid scores**.
 - **Tiered Confidence UX**: Implements a three-tier response system (Reject < 0.3, Warning 0.3-0.6, Confident > 0.6) to manage user expectations and safety.
 - **Signal-Based Guardrails**: Fast, rule-based post-validation that checks for source attribution, uncertainty patterns (e.g., "I think"), and response quality before delivery.
-- **Deep Feedback Pipeline**: Automatically logs failed or low-confidence interactions with full context (query, chunks, scores, answer) into Redis for root-cause analysis and continuous model improvement.
+- **Deep Feedback Pipeline**: Automatically logs failed or low-confidence interactions with full context into Redis.
+- **Structured JSON Logging**: Environment-aware logging (JSON in prod) with integrated **Request IDs** for distributed tracing.
+- **Startup Resilience**: Robust startup lifecycle with exponential backoff retries for Redis and graceful degradation.
+- **Granular Cold Start Metrics**: Automatic timing of embedding, index, and engine loading during boot.
 - **Ranking-Preserved Compaction**: Strict token-aware context building (max 3,000 tokens) that maintains rerank signal while preventing context overflow.
 
 ---
@@ -107,18 +110,16 @@ The system is fully containerized for production readiness.
 
 ### Prerequisites
 - Docker & Docker Compose
-- `.env` file populated with API keys
+- Environment file (`.env.dev` or `.env.prod`)
 
 ### Launching the Stack
-Spin up the API and Redis services:
+Spin up the stack using the production environment:
 ```bash
+cp .env.prod .env
 docker-compose up -d --build
 ```
 
-The API will be available at `http://localhost:8000`. You can verify readiness via:
-```bash
-curl http://localhost:8000/health
-```
+The API includes a production-hardened **Docker Health Check** and graceful shutdown handling.
 
 ---
 
