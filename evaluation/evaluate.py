@@ -32,9 +32,10 @@ async def check_faithfulness(answer: str, context: str) -> int:
     Your task is to verify if the following ANSWER is strictly grounded in the provided CONTEXT.
     
     RULES:
-    1. If the ANSWER contains information NOT in the CONTEXT, it is NOT faithful (Output: 0).
-    2. If the ANSWER is "Not found in SOP" and the CONTEXT indeed lacks the info, it is faithful (Output: 1).
-    3. Output ONLY the number 0 or 1. No explanation.
+    1. Return 1 ONLY if every claim in the ANSWER is directly supported by the CONTEXT.
+    2. Return 0 if ANY part of the ANSWER is unsupported or contradicts the CONTEXT.
+    3. If the ANSWER is "Not found in SOP" and the CONTEXT indeed lacks the information, return 1.
+    4. Output ONLY the number 0 or 1. Absolutely no conversational text or reasoning.
     
     CONTEXT:
     {context}
